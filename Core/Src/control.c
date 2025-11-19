@@ -455,8 +455,26 @@ HAL_StatusTypeDef alinear_rotor() {
 
 void init_lazos_control() {
 	// Habilito interrupciones para empezar a ejecutar lazos de control
-	__HAL_TIM_ENABLE_IT(&htim1, TIM_IT_UPDATE);
-	__HAL_TIM_ENABLE_IT(&htim3, TIM_IT_UPDATE);
+	HAL_StatusTypeDef error;
+	char cadena[16];
+	int len;
+
+	error = HAL_TIM_Base_Start_IT(&htim1);
+
+	if (error != HAL_OK) {
+		len = snprintf(cadena, sizeof(cadena), "E %d: Timer 1\n", error);
+		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+		return;
+	}
+
+	error = HAL_TIM_Base_Start_IT(&htim3);
+
+	if (error != HAL_OK) {
+		HAL_TIM_Base_Stop_IT(&htim1);
+		len = snprintf(cadena, sizeof(cadena), "E %d: Timer 3\n", error);
+		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+		return;
+	}
 
 	mensaje_t mensaje = {
 		.estado = READY
@@ -467,9 +485,25 @@ void init_lazos_control() {
 
 void deinit_lazos_control() {
 	// Deshabilito interrupciones para empezar a ejecutar lazos de control
-	__HAL_TIM_DISABLE_IT(&htim1, TIM_IT_UPDATE);
-	__HAL_TIM_DISABLE_IT(&htim3, TIM_IT_UPDATE);
+	HAL_StatusTypeDef error;
+	char cadena[16];
+	int len;
 
+	error = HAL_TIM_Base_Stop_IT(&htim1);
+
+	if (error != HAL_OK) {
+		len = snprintf(cadena, sizeof(cadena), "E %d: Timer 1\n", error);
+		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+		return;
+	}
+
+	error = HAL_TIM_Base_Stop_IT(&htim3);
+
+	if (error != HAL_OK) {
+		len = snprintf(cadena, sizeof(cadena), "E %d: Timer 3\n", error);
+		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+		return;
+	}
 
 	mensaje_t mensaje = {
 		.estado = IDLE

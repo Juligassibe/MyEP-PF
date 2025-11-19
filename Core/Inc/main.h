@@ -57,6 +57,7 @@ typedef enum origen_e {
 	ADC_2,
 	TIMER1,
 	TIMER2,
+	TIMER3,
 	PWM1,
 	PWM2,
 	PWM3,

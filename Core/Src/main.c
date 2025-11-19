@@ -41,7 +41,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define RX_SIZE 12
+#define RX_SIZE 16
 
 /* USER CODE END PD */
 
@@ -92,6 +92,7 @@ const osMessageQueueAttr_t cola_comandos_attributes = {
 
 xSemaphoreHandle semaforo_consola;
 volatile uint16_t tim1OF = 0;
+volatile uint16_t tim3OF = 0;
 encoder_t hencoder = { 0 };
 estados_e estado_sistema;
 uint8_t buffer_rx[RX_SIZE] = {0};
@@ -724,18 +725,29 @@ void init_sistema() {
 		return;
 	}
 
-	// Timer 1 para lazo de posicion
-	error = HAL_TIM_Base_Start_IT(&htim1);
-
-	if (error != HAL_OK) {
-		mensaje.estado = FAULT;
-		mensaje.origen = TIMER1;
-		mensaje.error = error;
-		osMessageQueuePut(cola_estadosHandle, &mensaje, 5, 1000);
-		return;
-	}
+//	// Timer 1 para lazo de posicion
+//	// Habilito la interupcion luego para no disparar lazo de control cuando no hace falta
+//	error = HAL_TIM_Base_Start(&htim1);
+//
+//	if (error != HAL_OK) {
+//		mensaje.estado = FAULT;
+//		mensaje.origen = TIMER1;
+//		mensaje.error = error;
+//		osMessageQueuePut(cola_estadosHandle, &mensaje, 5, 1000);
+//		return;
+//	}
 
 	// Timer 3 para PWM de las fases y lazo de corriente
+//	error = HAL_TIM_Base_Start(&htim3);
+//
+//	if (error != HAL_OK) {
+//		mensaje.estado = FAULT;
+//		mensaje.origen = TIMER3;
+//		mensaje.error = error;
+//		osMessageQueuePut(cola_estadosHandle, &mensaje, 5, 1000);
+//		return;
+//	}
+
 	error = HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
 	if (error != HAL_OK) {
@@ -880,18 +892,12 @@ void fault_handler(mensaje_t *mensaje) {
 
 	osMessageQueuePut(cola_estadosHandle, mensaje, 5, 1000);
 }
-uint16_t tamano;
+
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
-	if (Size > RX_SIZE) {
-		HAL_UART_Transmit(&huart1, (uint8_t *)"UART RX overflow\n", 17, 1000);
-	}
-	else {
-		buffer_rx[Size-1] = '\0';
-		tamano = Size;
-		BaseType_t tarea_mayor_prioridad = pdFALSE;
-		xSemaphoreGiveFromISR(semaforo_consola, &tarea_mayor_prioridad);
-		portYIELD_FROM_ISR(tarea_mayor_prioridad);
-	}
+	buffer_rx[Size-1] = '\0';
+	BaseType_t tarea_mayor_prioridad = pdFALSE;
+	xSemaphoreGiveFromISR(semaforo_consola, &tarea_mayor_prioridad);
+	portYIELD_FROM_ISR(tarea_mayor_prioridad);
 
 	HAL_UARTEx_ReceiveToIdle_DMA(&huart1, buffer_rx, RX_SIZE);
 	__HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT);
@@ -971,9 +977,10 @@ void consola(void *argument)
 
 	const char menu[] = "\n1. Ver estado del sistema\n"
 						"2. Iniciar lazos de control\n"
-						"3. Desactivar lazos de control\n"
+						"3. Parar lazos de control\n"
 						"4. Consigna nueva\n"
-						"5. Posicion del rotor (Q15.16)\n";
+						"5. Posicion del rotor (Q15.16)\n"
+						">> ";
 	int len_menu = strlen(menu);
 
 	uint8_t comando;
@@ -986,6 +993,8 @@ void consola(void *argument)
 		HAL_UART_Transmit(&huart1, (uint8_t *)menu, len_menu, 1000);
 
 		xSemaphoreTake(semaforo_consola, osWaitForever);
+		len = snprintf(cadena, sizeof(cadena), "%u, %u\n", tim1OF, tim3OF);
+		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 
 		comando = atoi((char *)buffer_rx);
 
@@ -1003,10 +1012,10 @@ void consola(void *argument)
 				deinit_lazos_control();
 				break;
 
-			case 4:
+			case 3:
 				len = snprintf(cadena, sizeof(cadena), "Ej: P123.45\n");
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-				len = snprintf(cadena, sizeof(cadena), "ENTER para cancelar\n");
+				len = snprintf(cadena, sizeof(cadena), "ENTER para cancelar\n>>");
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				xSemaphoreTake(semaforo_consola, osWaitForever);
 
@@ -1033,7 +1042,7 @@ void consola(void *argument)
 				break;
 
 			default:
-				len = snprintf(cadena, sizeof(cadena), "RX: %u\n", tamano);
+				len = snprintf(cadena, sizeof(cadena), "RX: %s\n", (char *)buffer_rx);
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 		}
@@ -1061,7 +1070,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   }
   /* USER CODE BEGIN Callback 1 */
 	else if (htim->Instance == TIM3) {
-		HAL_GPIO_WritePin(TEST_GPIO_Port, TEST_Pin, 1);
+		tim3OF++;
 	}
 
 	else if (htim->Instance == TIM1) {
