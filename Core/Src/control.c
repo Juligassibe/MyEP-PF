@@ -465,6 +465,19 @@ void init_lazos_control() {
 	osMessageQueuePut(cola_estadosHandle, &mensaje, 7, 1000);
 }
 
+void deinit_lazos_control() {
+	// Deshabilito interrupciones para empezar a ejecutar lazos de control
+	__HAL_TIM_DISABLE_IT(&htim1, TIM_IT_UPDATE);
+	__HAL_TIM_DISABLE_IT(&htim3, TIM_IT_UPDATE);
+
+
+	mensaje_t mensaje = {
+		.estado = IDLE
+	};
+
+	osMessageQueuePut(cola_estadosHandle, &mensaje, 7, 1000);
+}
+
 
 
 

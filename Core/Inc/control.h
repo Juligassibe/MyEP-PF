@@ -87,6 +87,7 @@ uint32_t mi_sqrt(uint64_t numero);
 int32_t get_fx_position();
 HAL_StatusTypeDef alinear_rotor();
 void init_lazos_control();
+void deinit_lazos_control();
 
 extern volatile int32_t overflow_encoder;
 extern uint32_t lecturas_adcs[MA_SAMPLES];

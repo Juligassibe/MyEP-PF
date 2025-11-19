@@ -880,13 +880,14 @@ void fault_handler(mensaje_t *mensaje) {
 
 	osMessageQueuePut(cola_estadosHandle, mensaje, 5, 1000);
 }
-
+uint16_t tamano;
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
 	if (Size > RX_SIZE) {
 		HAL_UART_Transmit(&huart1, (uint8_t *)"UART RX overflow\n", 17, 1000);
 	}
 	else {
 		buffer_rx[Size-1] = '\0';
+		tamano = Size;
 		BaseType_t tarea_mayor_prioridad = pdFALSE;
 		xSemaphoreGiveFromISR(semaforo_consola, &tarea_mayor_prioridad);
 		portYIELD_FROM_ISR(tarea_mayor_prioridad);
@@ -968,10 +969,11 @@ void consola(void *argument)
 	// Paro la ejecucion de la tarea hasta que termina el iniciado del sistema
 	xSemaphoreTake(semaforo_consola, osWaitForever);
 
-	const char menu[108] = "\n1. Ver estado del sistema\n"
-						   "2. Iniciar lazos de control\n"
-						   "3. Consigna nueva\n"
-						   "4. Posicion del rotor (Q15.16)\n";
+	const char menu[] = "\n1. Ver estado del sistema\n"
+						"2. Iniciar lazos de control\n"
+						"3. Desactivar lazos de control\n"
+						"4. Consigna nueva\n"
+						"5. Posicion del rotor (Q15.16)\n";
 	int len_menu = strlen(menu);
 
 	uint8_t comando;
@@ -998,6 +1000,10 @@ void consola(void *argument)
 				break;
 
 			case 3:
+				deinit_lazos_control();
+				break;
+
+			case 4:
 				len = snprintf(cadena, sizeof(cadena), "Ej: P123.45\n");
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				len = snprintf(cadena, sizeof(cadena), "ENTER para cancelar\n");
@@ -1021,12 +1027,13 @@ void consola(void *argument)
 				// VERIFICAR TASKENTERCRITICAL() Y TASKEXITCRITICAL()
 				break;
 
-			case 4:
-				HAL_UART_Transmit(&huart1, (uint8_t *)"4\n", 2, 1000);
+			case 5:
+				len = snprintf(cadena, sizeof(cadena), "Posicion: %ld (Q15.16)\n", get_fx_position());
+				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 
 			default:
-				len = snprintf(cadena, sizeof(cadena), "RX: %s\n", (char*)buffer_rx);
+				len = snprintf(cadena, sizeof(cadena), "RX: %u\n", tamano);
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 		}
