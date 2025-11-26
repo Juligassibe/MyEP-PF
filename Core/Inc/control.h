@@ -19,13 +19,8 @@
 #define N 				16
 #define FX_MAX 			(1 << M) - 1
 #define FX_MIN 	   		-(1 << M)
-#define MA_SAMPLES		8
 #define PP				4			// Pares de polos
 #define LAMBDA			1			// Flujo concatenado
-#define FX_I_MAX		fp2fx(2.0)	// 2A para los L298
-#define FX_KT			fp2fx(1.5 * PP * LAMBDA);
-#define FX_MAX_CUR		fp2fx(2.0)
-#define FX_MIN_CUR		fp2fx(-2.0)
 
 typedef struct {
 	// Lazo posicion
@@ -50,6 +45,8 @@ typedef struct {
 	int32_t fx_consigna_iq;
 	int32_t fx_consigna_vq;
 	int32_t fx_consigna_vd;
+	int32_t fx_corrienteA; 	// Guardo corrientes en n-1 para filtro IIR
+	int32_t fx_corrienteB;
 
 	// Saturacion de la salida
 	int32_t fx_maxOut;
@@ -88,9 +85,11 @@ int32_t get_fx_position();
 HAL_StatusTypeDef alinear_rotor();
 void init_lazos_control();
 void deinit_lazos_control();
+void get_Ld();
+void get_Lq();
 
 extern volatile int32_t overflow_encoder;
-extern uint32_t lecturas_adcs[MA_SAMPLES];
+extern uint32_t lecturas_adcs;
 extern controlador_t controlador;
 extern interpolador_t interpolador;
 

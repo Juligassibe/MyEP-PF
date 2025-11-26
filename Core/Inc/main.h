@@ -53,6 +53,8 @@ typedef enum estados_e {
 typedef enum origen_e {
 	CORRIENTES,
 	ENCODER,
+	ADC1_CAL,
+	ADC2_CAL,
 	ADC_MM,
 	ADC_2,
 	TIMER1,
@@ -81,6 +83,10 @@ extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;
 extern SPI_HandleTypeDef hspi1;
 extern osMessageQId cola_estadosHandle;
+extern xSemaphoreHandle semaforo_adc;
+extern int16_t adc_offsets[2];
+extern volatile uint16_t tim3OF;
+extern estados_e estado_sistema;
 
 /* USER CODE END EC */
 
@@ -98,6 +104,8 @@ void Error_Handler(void);
 
 void fault_handler(mensaje_t *mensaje);
 void init_sistema();
+void init_posicion();
+void get_adc_offsets();
 
 /* USER CODE END EFP */
 

@@ -90,14 +90,33 @@ void NMI_Handler(void)
   */
 void HardFault_Handler(void)
 {
-  /* USER CODE BEGIN HardFault_IRQn 0 */
+	HAL_UART_Transmit(&huart1, (uint8_t *)"Hard Fault\n", 11, 1000);
+	__asm volatile
+	    (
+	        "tst lr, #4                                                \n"
+	        "ite eq                                                    \n"
+	        "mrseq r0, msp                                             \n"
+	        "mrsne r0, psp                                             \n"
+	        "ldr r1, [r0, #24]                                         \n" // PC stored in stack
+	        "ldr r2, handler2_address_const                            \n"
+	        "bx r2                                                     \n"
+	        "handler2_address_const: .word prvGetRegistersFromStack    \n"
+	    );
+}
 
-  /* USER CODE END HardFault_IRQn 0 */
-  while (1)
-  {
-    /* USER CODE BEGIN W1_HardFault_IRQn 0 */
-    /* USER CODE END W1_HardFault_IRQn 0 */
-  }
+void prvGetRegistersFromStack(uint32_t *pulFaultStackAddress)
+{
+	volatile uint32_t r0  = pulFaultStackAddress[0];
+	volatile uint32_t r1  = pulFaultStackAddress[1];
+	volatile uint32_t r2  = pulFaultStackAddress[2];
+	volatile uint32_t r3  = pulFaultStackAddress[3];
+	volatile uint32_t r12 = pulFaultStackAddress[4];
+	volatile uint32_t lr  = pulFaultStackAddress[5];
+	volatile uint32_t pc  = pulFaultStackAddress[6];  // Dirección exacta de la instrucción del fallo
+	volatile uint32_t psr = pulFaultStackAddress[7];
+
+// Poné un breakpoint acá
+	while (1);
 }
 
 /**
@@ -106,15 +125,11 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
-
+	HAL_UART_Transmit(&huart1, (uint8_t *)"Mem man fault\n", 14, 1000);
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
   {
     /* USER CODE BEGIN W1_MemoryManagement_IRQn 0 */
-	  HAL_GPIO_TogglePin(CS_MT6835_GPIO_Port, CS_MT6835_Pin);
-	  HAL_Delay(100);
-	  HAL_GPIO_TogglePin(CS_MT6835_GPIO_Port, CS_MT6835_Pin);
-	  HAL_Delay(100);
     /* USER CODE END W1_MemoryManagement_IRQn 0 */
   }
 }
@@ -130,10 +145,7 @@ void BusFault_Handler(void)
   while (1)
   {
     /* USER CODE BEGIN W1_BusFault_IRQn 0 */
-	  HAL_GPIO_TogglePin(STEP_GPIO_Port, STEP_Pin);
-	  HAL_Delay(100);
-	  HAL_GPIO_TogglePin(STEP_GPIO_Port, STEP_Pin);
-	  HAL_Delay(100);
+
     /* USER CODE END W1_BusFault_IRQn 0 */
   }
 }
@@ -149,10 +161,7 @@ void UsageFault_Handler(void)
   while (1)
   {
     /* USER CODE BEGIN W1_UsageFault_IRQn 0 */
-	  HAL_GPIO_TogglePin(CS_MT6835_GPIO_Port, CS_MT6835_Pin);
-	  HAL_Delay(100);
-	  HAL_GPIO_TogglePin(CS_MT6835_GPIO_Port, CS_MT6835_Pin);
-	  HAL_Delay(100);
+
     /* USER CODE END W1_UsageFault_IRQn 0 */
   }
 }

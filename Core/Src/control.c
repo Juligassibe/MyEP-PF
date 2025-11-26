@@ -12,13 +12,19 @@ int32_t FX_ADC_CONST;
 int32_t FX_360;
 int32_t FX_2_3;
 int32_t FX_1_2;
+int32_t FX_KT;
 int32_t FX_1_KT;
 int32_t FX_Lq;
+int32_t FX_Ld;
 int32_t FX_1_dt;
 int32_t FX_V_CC;
+int32_t FX_I_MAX;
+int32_t FX_I_MIN;
+int32_t FX_ALPHA;
+
 
 volatile int32_t overflow_encoder = -1;
-uint32_t lecturas_adcs[MA_SAMPLES] = {0};
+uint32_t lecturas_adcs = 0;
 controlador_t controlador = {0};
 interpolador_t interpolador = {0};
 
@@ -64,6 +70,8 @@ void init_controlador(controlador_t *controlador) {
 	controlador->fx_consigna_iq = 0;
 	controlador->fx_consigna_vq = 0;
 	controlador->fx_consigna_vd = 0;
+	controlador->fx_corrienteA = 0;
+	controlador->fx_corrienteB = 0;
 
 	controlador->fx_maxOut = 100;
 	controlador->fx_minOut = 0;
@@ -76,10 +84,15 @@ void init_controlador(controlador_t *controlador) {
 	FX_360 = fp2fx(360.0);
 	FX_2_3 = fp2fx(2.0/3);
 	FX_1_2 = fp2fx(0.5);
+	FX_KT = fp2fx(1.5 * PP * LAMBDA);
 	FX_1_KT = fp2fx(1.0/(1.5 * PP * LAMBDA));
 	FX_Lq = fp2fx(1.0);
+	FX_Ld= fp2fx(1.0);
 	FX_1_dt = fp2fx(16384.0);
 	FX_V_CC = fp2fx(12.0);
+	FX_I_MAX = fp2fx(2.0);
+	FX_I_MIN = fp2fx(-2.0);
+	FX_ALPHA = fp2fx(0.03);	// alpha = 1 - lambda en el filtro IIR (no confundir con lambda de flujo concatenado)
 }
 
 void init_interpolador(interpolador_t *interpolador) {
@@ -207,6 +220,9 @@ void lazo_posicion() {
 
 	// LAZO CONTROL DE POSICION PI + D
 
+	// Genero nueva consigna de posicion
+	interpolar();
+
 	int32_t fx_error_pos = interpolador.fx_consigna_posicion - fx_position;
 
 	// P[n] = Kp * e[n]
@@ -264,28 +280,28 @@ void lazo_posicion() {
 int32_t get_corrientes_qd0(int32_t *corrientes) {
 	int32_t fx_rotor_position = get_fx_position();
 
-	uint16_t sum_adc1 = 0, sum_adc2 = 0, avg_adc1, avg_adc2;
+	uint16_t lectura_faseA = (uint16_t)(lecturas_adcs & 0xFFFF) + adc_offsets[0];
+	uint16_t lectura_faseB = (uint16_t)((lecturas_adcs >> 16) & 0xFFFF) + adc_offsets[1];
 
-	// Aplico un filtro de media movil a las corrientes medidas
-	for (int i = 0; i < MA_SAMPLES; i++) {
-		sum_adc1 += (uint16_t)((lecturas_adcs[i] & 0xFFFF));
-		sum_adc2 += (uint16_t)(((lecturas_adcs[i] >> 16) & 0xFFFF) + 15);
-	}
+	// La lectura directa del ADC seria xn
+	int32_t fx_xnA = FX_ADC_CONST * (lectura_faseA - 2048);
+	int32_t fx_xnB = FX_ADC_CONST * (lectura_faseB - 2048);
 
-	// 8 samples, dividir por 8 es igual a >> 3 lugares
-	avg_adc1 = sum_adc1 >> 3;
-	avg_adc2 = sum_adc2 >> 3;
+	// Filtro IIR
+	controlador.fx_corrienteA = controlador.fx_corrienteA + (((int64_t)FX_ALPHA * (fx_xnA - controlador.fx_corrienteA)) >> N);
+	controlador.fx_corrienteB = controlador.fx_corrienteB + (((int64_t)FX_ALPHA * (fx_xnB - controlador.fx_corrienteB)) >> N);
 
-	// Convierto lecturas de ADC luego de filtrar y las expreso en punto fijo
-	int32_t fx_corrienteA = FX_ADC_CONST * (avg_adc1 - 2048);
-	int32_t fx_corrienteB = FX_ADC_CONST * (avg_adc2 - 2048);
-	int32_t fx_corrienteC = -1 * (fx_corrienteA + fx_corrienteB);
+	int32_t fx_corrienteC = -1 * (controlador.fx_corrienteA + controlador.fx_corrienteB);
 
-	if (fx_corrienteA > FX_MAX_CUR || fx_corrienteA < FX_MIN_CUR ||
-		fx_corrienteB > FX_MAX_CUR || fx_corrienteB < FX_MIN_CUR ||
-		fx_corrienteC > FX_MAX_CUR || fx_corrienteC < FX_MIN_CUR) {
-		estados_e estado = FAULT;
-		osMessageQueuePut(cola_estadosHandle, &estado, 9, 1000);
+	if (controlador.fx_corrienteA > FX_I_MAX || controlador.fx_corrienteA < FX_I_MIN ||
+		controlador.fx_corrienteB > FX_I_MAX || controlador.fx_corrienteB < FX_I_MIN ||
+					fx_corrienteC > FX_I_MAX || 			fx_corrienteC < FX_I_MIN) {
+		mensaje_t mensaje = {
+			.estado = FAULT,
+			.origen = CORRIENTES
+		};
+
+		osMessageQueuePut(cola_estadosHandle, &mensaje, 9, 1000);
 	}
 
 	// La T. Park la calculo con el angulo electrico Tita_e = Pp * Tita_r
@@ -315,11 +331,10 @@ int32_t get_corrientes_qd0(int32_t *corrientes) {
 	}
 
 	// Hago T. de Park para obtener corrientes qd0
-	// REVISAR INDICES PARA +2/3PI Y -2/3PI
-	// iq = 2/3 * (ia * cos(tita) + ib * cos(tita - 2/3 pi) + ic * cos(tita + 120)
-	corrientes[0] = (int32_t)(FX_2_3 * ((((int64_t)fx_corrienteA * COS[(LUT_index1 > 359) ? (719 - LUT_index1) : (LUT_index1)]) >> N) +
-									    (((int64_t)fx_corrienteB * COS[(LUT_index2 > 359) ? (719 - LUT_index2) : (LUT_index2)]) >> N) +
-									    (((int64_t)fx_corrienteC * COS[(LUT_index3 > 359) ? (719 - LUT_index3) : (LUT_index3)]) >> N))) >> N;
+	// id = 2/3 * (ia * cos(tita) + ib * cos(tita - 2/3 pi) + ic * cos(tita + 2/3 pi)
+	corrientes[1] = (int32_t)(((int64_t)FX_2_3 * ((((int64_t)controlador.fx_corrienteA * COS[(LUT_index1 > 359) ? (719 - LUT_index1) : (LUT_index1)]) >> N) +
+												  (((int64_t)controlador.fx_corrienteB * COS[(LUT_index2 > 359) ? (719 - LUT_index2) : (LUT_index2)]) >> N) +
+															  (((int64_t)fx_corrienteC * COS[(LUT_index3 > 359) ? (719 - LUT_index3) : (LUT_index3)]) >> N))) >> N);
 
 	// Para el seno solo atraso 90 grados en la lut (180 elementos)
 	LUT_index1 -= 180;
@@ -342,10 +357,10 @@ int32_t get_corrientes_qd0(int32_t *corrientes) {
 		LUT_index3 -= 720;
 	}
 
-	// id = 2/3 * (ia * sin(tita) + ib * sin(tita - 2/3 pi) + ic * sin(tita + 120)
-	corrientes[1] = (int32_t)(FX_2_3 * ((((int64_t)fx_corrienteA * COS[(LUT_index1 > 359) ? (719 - LUT_index1) : (LUT_index1)]) >> N) +
-									    (((int64_t)fx_corrienteB * COS[(LUT_index2 > 359) ? (719 - LUT_index2) : (LUT_index2)]) >> N) +
-									    (((int64_t)fx_corrienteC * COS[(LUT_index3 > 359) ? (719 - LUT_index3) : (LUT_index3)]) >> N))) >> N;
+	// iq = -2/3 * (ia * sin(tita) + ib * sin(tita - 2/3 pi) + ic * sin(tita + 2/3 pi)
+	corrientes[0] = -1 * (int32_t)(((int64_t)FX_2_3 * ((((int64_t)controlador.fx_corrienteA * COS[(LUT_index1 > 359) ? (719 - LUT_index1) : (LUT_index1)]) >> N) +
+													   (((int64_t)controlador.fx_corrienteB * COS[(LUT_index2 > 359) ? (719 - LUT_index2) : (LUT_index2)]) >> N) +
+																   (((int64_t)fx_corrienteC * COS[(LUT_index3 > 359) ? (719 - LUT_index3) : (LUT_index3)]) >> N))) >> N);
 
 	// Retorno indice de LUT para no recalcular en T. inv. Park
 	return LUT_index1;
@@ -440,10 +455,10 @@ int32_t get_fx_position() {
 HAL_StatusTypeDef alinear_rotor() {
 	// Alimento solo fase A para alinear eje d con fase A
 	// Hago duty = 10% (1A aprox)
-	htim3.Instance->CCR1 = htim3.Instance->ARR / 10;
+	htim3.Instance->CCR1 = htim3.Instance->ARR / 5;
 
 	// Doy tiempo al rotor para alinearse
-	osDelay(pdMS_TO_TICKS(1));
+	osDelay(pdMS_TO_TICKS(500));
 
 	// Pongo el 0 del encoder en esa posicion
 	if (mt6835_set_zero(&hspi1, CS_MT6835_GPIO_Port, CS_MT6835_Pin) != MT6835_ZERO_OK) {
@@ -455,61 +470,61 @@ HAL_StatusTypeDef alinear_rotor() {
 
 void init_lazos_control() {
 	// Habilito interrupciones para empezar a ejecutar lazos de control
-	HAL_StatusTypeDef error;
-	char cadena[16];
-	int len;
-
-	error = HAL_TIM_Base_Start_IT(&htim1);
-
-	if (error != HAL_OK) {
-		len = snprintf(cadena, sizeof(cadena), "E %d: Timer 1\n", error);
-		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-		return;
-	}
-
-	error = HAL_TIM_Base_Start_IT(&htim3);
-
-	if (error != HAL_OK) {
-		HAL_TIM_Base_Stop_IT(&htim1);
-		len = snprintf(cadena, sizeof(cadena), "E %d: Timer 3\n", error);
-		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-		return;
-	}
-
-	mensaje_t mensaje = {
-		.estado = READY
-	};
-
-	osMessageQueuePut(cola_estadosHandle, &mensaje, 7, 1000);
+//	HAL_StatusTypeDef error;
+//	char cadena[16];
+//	int len;
+//
+//	error = HAL_TIM_Base_Start_IT(&htim1);
+//
+//	if (error != HAL_OK) {
+//		len = snprintf(cadena, sizeof(cadena), "E: Timer 1 (%d)\n", error);
+//		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+//		return;
+//	}
+//
+//	error = HAL_TIM_Base_Start_IT(&htim3);
+//
+//	if (error != HAL_OK) {
+//		HAL_TIM_Base_Stop_IT(&htim1);
+//		len = snprintf(cadena, sizeof(cadena), "E: Timer 3 (%d)\n", error);
+//		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+//		return;
+//	}
+//
+//	mensaje_t mensaje = {
+//		.estado = READY
+//	};
+//
+//	osMessageQueuePut(cola_estadosHandle, &mensaje, 7, 1000);
 }
 
 void deinit_lazos_control() {
 	// Deshabilito interrupciones para empezar a ejecutar lazos de control
-	HAL_StatusTypeDef error;
-	char cadena[16];
-	int len;
-
-	error = HAL_TIM_Base_Stop_IT(&htim1);
-
-	if (error != HAL_OK) {
-		len = snprintf(cadena, sizeof(cadena), "E %d: Timer 1\n", error);
-		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-		return;
-	}
-
-	error = HAL_TIM_Base_Stop_IT(&htim3);
-
-	if (error != HAL_OK) {
-		len = snprintf(cadena, sizeof(cadena), "E %d: Timer 3\n", error);
-		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-		return;
-	}
-
-	mensaje_t mensaje = {
-		.estado = IDLE
-	};
-
-	osMessageQueuePut(cola_estadosHandle, &mensaje, 7, 1000);
+//	HAL_StatusTypeDef error;
+//	char cadena[16];
+//	int len;
+//
+//	error = HAL_TIM_Base_Stop_IT(&htim1);
+//
+//	if (error != HAL_OK) {
+//		len = snprintf(cadena, sizeof(cadena), "E %d: Timer 1\n", error);
+//		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+//		return;
+//	}
+//
+//	error = HAL_TIM_Base_Stop_IT(&htim3);
+//
+//	if (error != HAL_OK) {
+//		len = snprintf(cadena, sizeof(cadena), "E %d: Timer 3\n", error);
+//		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+//		return;
+//	}
+//
+//	mensaje_t mensaje = {
+//		.estado = IDLE
+//	};
+//
+//	osMessageQueuePut(cola_estadosHandle, &mensaje, 7, 1000);
 }
 
 

@@ -78,6 +78,13 @@ const osThreadAttr_t cli_attributes = {
   .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
+/* Definitions for test */
+osThreadId_t testHandle;
+const osThreadAttr_t test_attributes = {
+  .name = "test",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityRealtime,
+};
 /* Definitions for cola_estados */
 osMessageQueueId_t cola_estadosHandle;
 const osMessageQueueAttr_t cola_estados_attributes = {
@@ -91,11 +98,13 @@ const osMessageQueueAttr_t cola_comandos_attributes = {
 /* USER CODE BEGIN PV */
 
 xSemaphoreHandle semaforo_consola;
+xSemaphoreHandle semaforo_adc;
 volatile uint16_t tim1OF = 0;
 volatile uint16_t tim3OF = 0;
 encoder_t hencoder = { 0 };
 estados_e estado_sistema;
 uint8_t buffer_rx[RX_SIZE] = {0};
+int16_t adc_offsets[2] = {0};
 
 /* USER CODE END PV */
 
@@ -112,6 +121,7 @@ static void MX_TIM2_Init(void);
 static void MX_TIM1_Init(void);
 void sm(void *argument);
 void consola(void *argument);
+void test_task(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -162,6 +172,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   semaforo_consola = xSemaphoreCreateBinary();
+  semaforo_adc = xSemaphoreCreateBinary();
 
   /* USER CODE END 2 */
 
@@ -198,6 +209,9 @@ int main(void)
 
   /* creation of cli */
   cliHandle = osThreadNew(consola, NULL, &cli_attributes);
+
+  /* creation of test */
+  testHandle = osThreadNew(test_task, NULL, &test_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
@@ -313,7 +327,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -360,7 +374,7 @@ static void MX_ADC2_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_1;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -526,7 +540,7 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 2;
   htim3.Init.CounterMode = TIM_COUNTERMODE_CENTERALIGNED1;
-  htim3.Init.Period = 749;
+  htim3.Init.Period = 599;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -705,6 +719,26 @@ void init_sistema() {
 	}
 
 	// INIT ADCs
+	error = HAL_ADCEx_Calibration_Start(&hadc1);
+
+	if (error != HAL_OK) {
+		mensaje.estado = FAULT;
+		mensaje.origen = ADC1_CAL;
+		mensaje.error = error;
+		osMessageQueuePut(cola_estadosHandle, &mensaje, 5, 1000);
+		return;
+	}
+
+	error = HAL_ADCEx_Calibration_Start(&hadc2);
+
+	if (error != HAL_OK) {
+		mensaje.estado = FAULT;
+		mensaje.origen = ADC2_CAL;
+		mensaje.error = error;
+		osMessageQueuePut(cola_estadosHandle, &mensaje, 5, 1000);
+		return;
+	}
+
 	error = HAL_ADC_Start(&hadc2);
 
 	if (error != HAL_OK) {
@@ -715,7 +749,7 @@ void init_sistema() {
 		return;
 	}
 
-	error = HAL_ADCEx_MultiModeStart_DMA(&hadc1, lecturas_adcs, MA_SAMPLES);
+	error = HAL_ADCEx_MultiModeStart_DMA(&hadc1, &lecturas_adcs, 1);
 
 	if (error != HAL_OK) {
 		mensaje.estado = FAULT;
@@ -725,28 +759,7 @@ void init_sistema() {
 		return;
 	}
 
-//	// Timer 1 para lazo de posicion
-//	// Habilito la interupcion luego para no disparar lazo de control cuando no hace falta
-//	error = HAL_TIM_Base_Start(&htim1);
-//
-//	if (error != HAL_OK) {
-//		mensaje.estado = FAULT;
-//		mensaje.origen = TIMER1;
-//		mensaje.error = error;
-//		osMessageQueuePut(cola_estadosHandle, &mensaje, 5, 1000);
-//		return;
-//	}
-
-	// Timer 3 para PWM de las fases y lazo de corriente
-//	error = HAL_TIM_Base_Start(&htim3);
-//
-//	if (error != HAL_OK) {
-//		mensaje.estado = FAULT;
-//		mensaje.origen = TIMER3;
-//		mensaje.error = error;
-//		osMessageQueuePut(cola_estadosHandle, &mensaje, 5, 1000);
-//		return;
-//	}
+	// Timer 3 para PWM de las fases
 
 	error = HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
@@ -777,6 +790,10 @@ void init_sistema() {
 		osMessageQueuePut(cola_estadosHandle, &mensaje, 5, 1000);
 		return;
 	}
+
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
 
 	// UART con DMA para recibir comandos desde PC
 	// Deshabilito interrupcion por half-transmit
@@ -816,6 +833,10 @@ void init_sistema() {
 		return;
 	}
 	__HAL_TIM_ENABLE_IT(&htim2, TIM_IT_UPDATE);
+	__HAL_TIM_SET_COUNTER(&htim2, 0);
+
+	// Luego de hacer 0, hago las corrientes 0 para calibrar ADCs
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
 
 	mensaje.estado = IDLE;
 	osMessageQueuePut(cola_estadosHandle, &mensaje, 5, 1000);
@@ -829,11 +850,11 @@ void fault_handler(mensaje_t *mensaje) {
 		case CORRIENTES:
 			// Deshabilito PWMs e interrupciones para lazos de control
 			HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
-			htim3.Instance->CCR1 = 0;
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
 			HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
-			htim3.Instance->CCR2 = 0;
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
 			HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
-			htim3.Instance->CCR3 = 0;
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
 			__HAL_TIM_DISABLE_IT(&htim3, TIM_IT_UPDATE);
 
 			__HAL_TIM_DISABLE_IT(&htim1, TIM_IT_UPDATE);
@@ -843,18 +864,28 @@ void fault_handler(mensaje_t *mensaje) {
 			break;
 
 		case ENCODER:
-			len = snprintf(cadena, sizeof(cadena), "E: Encoder:\n%d\n%d\n%d\n%d\n%d\n%d\n", hencoder.abz_res, hencoder.abz_swap, hencoder.z_edge,
+			len = snprintf(cadena, sizeof(cadena), "E: Encoder:\n%u\n%u\n%u\n%u\n%u\n%u\n", hencoder.abz_res, hencoder.abz_swap, hencoder.z_edge,
 																							hencoder.z_width, hencoder.z_phase, hencoder.rot_dir);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
+		case ADC1_CAL:
+			len = snprintf(cadena, sizeof(cadena), "E: ADC1 CAL (%d)\n", mensaje->error);
+			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
+			break;
+
+		case ADC2_CAL:
+			len = snprintf(cadena, sizeof(cadena), "E: ADC2 CAL (%d)\n", mensaje->error);
+			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
+			break;
+
 		case ADC_2:
-			len = snprintf(cadena, sizeof(cadena), "E: ADC2 Start (%u)\n", mensaje->error);
+			len = snprintf(cadena, sizeof(cadena), "E: ADC2 Start (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
 		case ADC_MM:
-			len = snprintf(cadena, sizeof(cadena), "E: ADC MultiMode (%u)\n", mensaje->error);
+			len = snprintf(cadena, sizeof(cadena), "E: ADC MultiMode (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
@@ -883,6 +914,10 @@ void fault_handler(mensaje_t *mensaje) {
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
+		case UART_RX:
+			len = snprintf(cadena, sizeof(cadena), "E: UART RX (%d)\n", mensaje->error);
+			HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+
 		default:
 			HAL_UART_Transmit(&huart1, (uint8_t *)"Error desconocido.\n", 19, 1000);
 			break;
@@ -891,6 +926,30 @@ void fault_handler(mensaje_t *mensaje) {
 	mensaje->estado = NOT_INIT;
 
 	osMessageQueuePut(cola_estadosHandle, mensaje, 5, 1000);
+}
+
+void get_adc_offsets() {
+	if (estado_sistema != IDLE) {
+		HAL_UART_Transmit(&huart1, (uint8_t *)"Pasar a estado IDLE\n", 20, 1000);
+		return;
+	}
+	HAL_TIM_Base_Start(&htim3);
+	// Filtro de media movil para eliminar componente de 50Hz
+	uint32_t sum_adc1 = 0, sum_adc2 = 0;
+	uint16_t avg_adc1, avg_adc2;
+	for (int j = 0; j < 20; j++) {
+		sum_adc1 += (uint16_t)((lecturas_adcs & 0xFFFF));
+		sum_adc2 += (uint16_t)(((lecturas_adcs >> 16) & 0xFFFF));
+	}
+
+	avg_adc1 = sum_adc1 / 20;
+	avg_adc2 = sum_adc2 / 20;
+
+	adc_offsets[0] = 2048 - avg_adc1;
+	adc_offsets[1] = 2048 - avg_adc2;
+
+	HAL_TIM_Base_Stop(&htim3);
+	__HAL_TIM_SET_COUNTER(&htim3, 0);
 }
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
@@ -932,7 +991,7 @@ void sm(void *argument)
 				break;
 
 			case NOT_INIT:
-				HAL_UART_Transmit(&huart1, (uint8_t *)"Error al iniciar. Reiniciar.\n", 29, 1000);
+				HAL_UART_Transmit(&huart1, (uint8_t *)"Error, reiniciar.\n", 18, 1000);
 				break;
 
 			case IDLE:
@@ -941,7 +1000,7 @@ void sm(void *argument)
 				break;
 
 			case READY:
-				HAL_UART_Transmit(&huart1, (uint8_t *)"Lazos de control listos.\n", 25, 1000);
+				HAL_UART_Transmit(&huart1, (uint8_t *)"Lazos de control iniciados.\n", 28, 1000);
 				break;
 
 			case CLOSED_LOOP:
@@ -972,7 +1031,7 @@ void sm(void *argument)
 void consola(void *argument)
 {
   /* USER CODE BEGIN consola */
-	// Paro la ejecucion de la tarea hasta que termina el iniciado del sistema
+	// No ejecuto la tarea hasta que termina el inicio del sistema
 	xSemaphoreTake(semaforo_consola, osWaitForever);
 
 	const char menu[] = "\n1. Ver estado del sistema\n"
@@ -980,6 +1039,7 @@ void consola(void *argument)
 						"3. Parar lazos de control\n"
 						"4. Consigna nueva\n"
 						"5. Posicion del rotor (Q15.16)\n"
+						"6. Calibrar ADCs\n"
 						">> ";
 	int len_menu = strlen(menu);
 
@@ -993,8 +1053,6 @@ void consola(void *argument)
 		HAL_UART_Transmit(&huart1, (uint8_t *)menu, len_menu, 1000);
 
 		xSemaphoreTake(semaforo_consola, osWaitForever);
-		len = snprintf(cadena, sizeof(cadena), "%u, %u\n", tim1OF, tim3OF);
-		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 
 		comando = atoi((char *)buffer_rx);
 
@@ -1012,7 +1070,7 @@ void consola(void *argument)
 				deinit_lazos_control();
 				break;
 
-			case 3:
+			case 4:
 				len = snprintf(cadena, sizeof(cadena), "Ej: P123.45\n");
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				len = snprintf(cadena, sizeof(cadena), "ENTER para cancelar\n>>");
@@ -1041,6 +1099,18 @@ void consola(void *argument)
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 
+			case 6:
+				get_adc_offsets();
+				len = snprintf(cadena, sizeof(cadena), "Offsets: %d, %d\n", adc_offsets[0], adc_offsets[1]);
+				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+				break;
+
+			case 7:
+				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, htim3.Instance->CCR1 > 0 ? 0 : 150);
+				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+				break;
+
 			default:
 				len = snprintf(cadena, sizeof(cadena), "RX: %s\n", (char *)buffer_rx);
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
@@ -1049,6 +1119,39 @@ void consola(void *argument)
 
 	}
   /* USER CODE END consola */
+}
+
+/* USER CODE BEGIN Header_test_task */
+/**
+* @brief Function implementing the test thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_test_task */
+void test_task(void *argument)
+{
+  /* USER CODE BEGIN test_task */
+	osDelay(pdMS_TO_TICKS(2000));
+	char cadena[16];
+	int len;
+
+	int32_t corrientes[2];
+//	uint32_t fin;
+//	HAL_TIM_Base_Start_IT(&htim1);
+	HAL_TIM_Base_Start_IT(&htim3);
+  /* Infinite loop */
+  while (1) {
+//	  tim1OF = 0;
+//	  __HAL_TIM_SET_COUNTER(&htim1, 0);
+	  get_corrientes_qd0(corrientes);
+//	  fin = __HAL_TIM_GET_COUNTER(&htim1);
+
+	  len = snprintf(cadena, sizeof(cadena), "%ld, %ld\n", corrientes[0], corrientes[1]);
+	  HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+
+	  osDelay(pdMS_TO_TICKS(10));
+  }
+  /* USER CODE END test_task */
 }
 
 /**
@@ -1070,11 +1173,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   }
   /* USER CODE BEGIN Callback 1 */
 	else if (htim->Instance == TIM3) {
-		tim3OF++;
+//		tim3OF++;
 	}
 
 	else if (htim->Instance == TIM1) {
-		tim1OF++;
+//		tim1OF++;
 	}
 
 	else if (htim->Instance == TIM2) {
