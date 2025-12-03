@@ -65,8 +65,8 @@ void init_controlador(controlador_t *controlador) {
 
 	controlador->fx_tau = 1;
 
-	controlador->fx_Pq = 1;
-	controlador->fx_Pd = 1;
+	controlador->fx_Pq = fp2fx(1.0);
+	controlador->fx_Pd = fp2fx(1.0);
 	controlador->fx_consigna_torque = 0;
 	controlador->fx_consigna_iq = 0;
 	controlador->fx_consigna_vq = 0;
@@ -468,10 +468,10 @@ int32_t get_fx_position() {
 HAL_StatusTypeDef alinear_rotor() {
 	// Alimento solo fase A para alinear eje d con fase A
 	// Hago duty = 10% (1A aprox)
-	htim3.Instance->CCR1 = htim3.Instance->ARR / 2;
+	htim3.Instance->CCR1 = 300;
 
 	// Doy tiempo al rotor para alinearse
-	osDelay(pdMS_TO_TICKS(500));
+	osDelay(pdMS_TO_TICKS(1000));
 
 	// Pongo el 0 del encoder en esa posicion
 	if (mt6835_set_zero(&hspi1, CS_MT6835_GPIO_Port, CS_MT6835_Pin) != MT6835_ZERO_OK) {

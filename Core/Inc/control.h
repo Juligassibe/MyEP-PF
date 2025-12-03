@@ -20,7 +20,7 @@
 #define FX_MAX 			(1 << M) - 1
 #define FX_MIN 	   		-(1 << M)
 #define PP				4			// Pares de polos
-#define LAMBDA			1			// Flujo concatenado
+#define LAMBDA			0.0014			// Flujo concatenado
 
 typedef struct {
 	// Lazo posicion

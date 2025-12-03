@@ -97,7 +97,6 @@ const osThreadAttr_t lc_corriente_attributes = {
 xSemaphoreHandle semaforo_consola;
 xSemaphoreHandle semaforo_adc;
 xSemaphoreHandle semaforo_posicion;
-xSemaphoreHandle semaforo_corriente;
 xQueueHandle cola_estados;
 volatile uint16_t tim1OF = 0;
 volatile uint16_t tim3OF = 0;
@@ -122,7 +121,6 @@ static void MX_TIM1_Init(void);
 void sm(void *argument);
 void consola(void *argument);
 void control_posicion(void *argument);
-void control_corriente(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -175,7 +173,6 @@ int main(void)
   semaforo_consola = xSemaphoreCreateBinary();
   semaforo_adc = xSemaphoreCreateBinary();
   semaforo_posicion = xSemaphoreCreateBinary();
-  semaforo_corriente = xSemaphoreCreateBinary();
   cola_estados = xQueueCreate(3, sizeof(mensaje_t));
 
   /* USER CODE END 2 */
@@ -210,9 +207,6 @@ int main(void)
   /* creation of lc_posicion */
   lc_posicionHandle = osThreadNew(control_posicion, NULL, &lc_posicion_attributes);
 
-  /* creation of lc_corriente */
-  lc_corrienteHandle = osThreadNew(control_corriente, NULL, &lc_corriente_attributes);
-
   /* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
   /* USER CODE END RTOS_THREADS */
@@ -228,9 +222,20 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+//    char cadena[32];
+//  	int len;
+//
+//  	int32_t corrientes[2];
+//  	init_sistema();
+
+    /* Infinite loop */
 	while (1) {
     /* USER CODE END WHILE */
-
+//		get_corrientes_qd0(corrientes);
+//
+//		len = snprintf(cadena, sizeof(cadena), "%ld, %ld\n", corrientes[0], corrientes[1]);
+//		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+//		HAL_Delay(500);
     /* USER CODE BEGIN 3 */
 	}
   /* USER CODE END 3 */
@@ -1252,24 +1257,6 @@ void control_posicion(void *argument)
   /* USER CODE END control_posicion */
 }
 
-/* USER CODE BEGIN Header_control_corriente */
-/**
-* @brief Function implementing the lc_corriente thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_control_corriente */
-void control_corriente(void *argument)
-{
-  /* USER CODE BEGIN control_corriente */
-  /* Infinite loop */
-	while (1) {
-		xSemaphoreTake(semaforo_corriente, portMAX_DELAY);
-		lazo_corriente();
-	}
-  /* USER CODE END control_corriente */
-}
-
 /**
   * @brief  Period elapsed callback in non blocking mode
   * @note   This function is called  when TIM4 interrupt took place, inside
@@ -1289,9 +1276,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   }
   /* USER CODE BEGIN Callback 1 */
 	else if (htim->Instance == TIM3) {
-		BaseType_t tarea_mayor_prioridad = pdFALSE;
-		xSemaphoreGiveFromISR(semaforo_corriente, &tarea_mayor_prioridad);
-		portYIELD_FROM_ISR(tarea_mayor_prioridad);
+//		BaseType_t tarea_mayor_prioridad = pdFALSE;
+//		xSemaphoreGiveFromISR(semaforo_corriente, &tarea_mayor_prioridad);
+//		portYIELD_FROM_ISR(tarea_mayor_prioridad);
+		lazo_corriente();
+//		HAL_GPIO_WritePin(TEST_GPIO_Port, TEST_Pin, GPIO_PIN_SET);
 	}
 
 	else if (htim->Instance == TIM1) {
