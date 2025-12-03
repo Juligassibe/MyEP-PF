@@ -57,13 +57,16 @@ typedef enum origen_e {
 	ADC2_CAL,
 	ADC_MM,
 	ADC_2,
+	ADC1_INJ,
+	ADC2_INJ,
 	TIMER1,
 	TIMER2,
 	TIMER3,
 	PWM1,
 	PWM2,
 	PWM3,
-	UART_RX
+	UART_RX,
+	CLI
 } origen_e;
 
 typedef struct mensaje_t {
@@ -83,8 +86,11 @@ extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim3;
 extern SPI_HandleTypeDef hspi1;
 extern osMessageQId cola_estadosHandle;
+extern xQueueHandle cola_estados;
+extern xSemaphoreHandle semaforo_consola;
 extern xSemaphoreHandle semaforo_adc;
 extern int16_t adc_offsets[2];
+extern volatile uint16_t tim1OF;
 extern volatile uint16_t tim3OF;
 extern estados_e estado_sistema;
 

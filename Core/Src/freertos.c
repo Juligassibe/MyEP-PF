@@ -25,6 +25,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include <stdio.h>
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,6 +53,25 @@
 /* USER CODE BEGIN FunctionPrototypes */
 
 /* USER CODE END FunctionPrototypes */
+
+/* Hook prototypes */
+void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName);
+
+/* USER CODE BEGIN 4 */
+void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
+{
+   /* Run time stack overflow checking is performed if
+   configCHECK_FOR_STACK_OVERFLOW is defined to 1 or 2. This hook function is
+   called if a stack overflow is detected. */
+	char cadena[64];
+	int len;
+
+	len = snprintf(cadena, sizeof(cadena), "STACK OVERFLOW en tarea: %s\n", pcTaskName);
+	HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+	taskDISABLE_INTERRUPTS();
+	while(1);
+}
+/* USER CODE END 4 */
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */

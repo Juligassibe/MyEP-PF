@@ -16,6 +16,7 @@ int32_t FX_KT;
 int32_t FX_1_KT;
 int32_t FX_Lq;
 int32_t FX_Ld;
+int32_t FX_Rs;
 int32_t FX_1_dt;
 int32_t FX_V_CC;
 int32_t FX_I_MAX;
@@ -60,7 +61,7 @@ void init_controlador(controlador_t *controlador) {
 	controlador->fx_integral = 0;
 	controlador->fx_derivativo = 0;
 
-	controlador->fx_dt = fp2fx(0.00006);
+	controlador->fx_dt = fp2fx(0.001);
 
 	controlador->fx_tau = 1;
 
@@ -76,8 +77,6 @@ void init_controlador(controlador_t *controlador) {
 	controlador->fx_maxOut = 100;
 	controlador->fx_minOut = 0;
 
-	controlador->fx_pid_max = FX_I_MAX * FX_KT;
-
 	// Inicio constantes globales
 	FX_PP = fp2fx((double)PP);
 	FX_ADC_CONST = fp2fx((5.0/(2805-2048)));
@@ -86,13 +85,16 @@ void init_controlador(controlador_t *controlador) {
 	FX_1_2 = fp2fx(0.5);
 	FX_KT = fp2fx(1.5 * PP * LAMBDA);
 	FX_1_KT = fp2fx(1.0/(1.5 * PP * LAMBDA));
-	FX_Lq = fp2fx(1.0);
-	FX_Ld= fp2fx(1.0);
-	FX_1_dt = fp2fx(16384.0);
+	FX_Lq = 20;
+	FX_Ld = 15;
+	FX_Rs = fp2fx(0.8);
+	FX_1_dt = fp2fx(1000.0);
 	FX_V_CC = fp2fx(12.0);
-	FX_I_MAX = fp2fx(2.0);
-	FX_I_MIN = fp2fx(-2.0);
+	FX_I_MAX = fp2fx(1.5);
+	FX_I_MIN = fp2fx(-1.5);
 	FX_ALPHA = fp2fx(0.03);	// alpha = 1 - lambda en el filtro IIR (no confundir con lambda de flujo concatenado)
+
+	controlador->fx_pid_max = ((int64_t)FX_I_MAX * FX_KT) >> N;
 }
 
 void init_interpolador(interpolador_t *interpolador) {
@@ -248,7 +250,7 @@ void lazo_posicion() {
 	}
 	// Limite inferior del integrador
 	if (-controlador.fx_pid_max < controlador.fx_proporcional + controlador.fx_derivativo) {
-		fx_integral_min = -controlador.fx_pid_max + controlador.fx_proporcional + controlador.fx_derivativo;
+		fx_integral_min = -controlador.fx_pid_max - controlador.fx_proporcional - controlador.fx_derivativo;
 	}
 	else {
 		fx_integral_min = 0;
@@ -283,13 +285,21 @@ int32_t get_corrientes_qd0(int32_t *corrientes) {
 	uint16_t lectura_faseA = (uint16_t)(lecturas_adcs & 0xFFFF) + adc_offsets[0];
 	uint16_t lectura_faseB = (uint16_t)((lecturas_adcs >> 16) & 0xFFFF) + adc_offsets[1];
 
-	// La lectura directa del ADC seria xn
+	lectura_faseA &= 0xFFFC;
+	lectura_faseB &= 0xFFFC;
+
+	// La lectura nueva del ADC seria xn en el filtro IIR
 	int32_t fx_xnA = FX_ADC_CONST * (lectura_faseA - 2048);
 	int32_t fx_xnB = FX_ADC_CONST * (lectura_faseB - 2048);
 
 	// Filtro IIR
 	controlador.fx_corrienteA = controlador.fx_corrienteA + (((int64_t)FX_ALPHA * (fx_xnA - controlador.fx_corrienteA)) >> N);
 	controlador.fx_corrienteB = controlador.fx_corrienteB + (((int64_t)FX_ALPHA * (fx_xnB - controlador.fx_corrienteB)) >> N);
+//	char cadena[16];
+//	int len;
+//
+//	len = snprintf(cadena, sizeof(cadena), "%ld\n", controlador.fx_corrienteA);
+//	HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 
 	int32_t fx_corrienteC = -1 * (controlador.fx_corrienteA + controlador.fx_corrienteB);
 
@@ -301,7 +311,10 @@ int32_t get_corrientes_qd0(int32_t *corrientes) {
 			.origen = CORRIENTES
 		};
 
-		osMessageQueuePut(cola_estadosHandle, &mensaje, 9, 1000);
+		BaseType_t tarea_mayor_prioridad = pdFALSE;
+		xQueueSendFromISR(cola_estados, &mensaje, &tarea_mayor_prioridad);
+		portYIELD_FROM_ISR(tarea_mayor_prioridad);
+//		osMessageQueuePut(cola_estadosHandle, &mensaje, 9, 1000);
 	}
 
 	// La T. Park la calculo con el angulo electrico Tita_e = Pp * Tita_r
@@ -455,7 +468,7 @@ int32_t get_fx_position() {
 HAL_StatusTypeDef alinear_rotor() {
 	// Alimento solo fase A para alinear eje d con fase A
 	// Hago duty = 10% (1A aprox)
-	htim3.Instance->CCR1 = htim3.Instance->ARR / 5;
+	htim3.Instance->CCR1 = htim3.Instance->ARR / 2;
 
 	// Doy tiempo al rotor para alinearse
 	osDelay(pdMS_TO_TICKS(500));
@@ -474,7 +487,7 @@ void init_lazos_control() {
 //	char cadena[16];
 //	int len;
 //
-//	error = HAL_TIM_Base_Start_IT(&htim1);
+//	error = HAL_TIM_Base_Start(&htim1);
 //
 //	if (error != HAL_OK) {
 //		len = snprintf(cadena, sizeof(cadena), "E: Timer 1 (%d)\n", error);
@@ -482,7 +495,7 @@ void init_lazos_control() {
 //		return;
 //	}
 //
-//	error = HAL_TIM_Base_Start_IT(&htim3);
+//	error = HAL_TIM_Base_Start(&htim3);
 //
 //	if (error != HAL_OK) {
 //		HAL_TIM_Base_Stop_IT(&htim1);
@@ -490,16 +503,21 @@ void init_lazos_control() {
 //		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 //		return;
 //	}
-//
-//	mensaje_t mensaje = {
-//		.estado = READY
-//	};
-//
-//	osMessageQueuePut(cola_estadosHandle, &mensaje, 7, 1000);
+
+	mensaje_t mensaje = {
+		.estado = READY
+	};
+
+	xQueueSend(cola_estados, &mensaje, 1000);
+
+	__HAL_TIM_SET_COUNTER(&htim1, 0);
+	__HAL_TIM_SET_COUNTER(&htim3, 0);
+	__HAL_TIM_ENABLE_IT(&htim1, TIM_IT_UPDATE);
+	__HAL_TIM_ENABLE_IT(&htim3, TIM_IT_UPDATE);
 }
 
 void deinit_lazos_control() {
-	// Deshabilito interrupciones para empezar a ejecutar lazos de control
+	// Deshabilito interrupciones para dejar de ejecutar lazos de control
 //	HAL_StatusTypeDef error;
 //	char cadena[16];
 //	int len;
@@ -507,7 +525,7 @@ void deinit_lazos_control() {
 //	error = HAL_TIM_Base_Stop_IT(&htim1);
 //
 //	if (error != HAL_OK) {
-//		len = snprintf(cadena, sizeof(cadena), "E %d: Timer 1\n", error);
+//		len = snprintf(cadena, sizeof(cadena), "E: Timer 1 (%d)\n", error);
 //		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 //		return;
 //	}
@@ -515,16 +533,167 @@ void deinit_lazos_control() {
 //	error = HAL_TIM_Base_Stop_IT(&htim3);
 //
 //	if (error != HAL_OK) {
-//		len = snprintf(cadena, sizeof(cadena), "E %d: Timer 3\n", error);
+//		len = snprintf(cadena, sizeof(cadena), "E: Timer 3 (%d)\n", error);
 //		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 //		return;
 //	}
-//
-//	mensaje_t mensaje = {
-//		.estado = IDLE
-//	};
-//
-//	osMessageQueuePut(cola_estadosHandle, &mensaje, 7, 1000);
+
+	mensaje_t mensaje = {
+		.estado = IDLE,
+		.origen = CLI
+	};
+
+	xQueueSend(cola_estados, &mensaje, 1000);
+
+	__HAL_TIM_DISABLE_IT(&htim1, TIM_IT_UPDATE);
+	__HAL_TIM_DISABLE_IT(&htim3, TIM_IT_UPDATE);
+}
+
+void get_Ld() {
+	if (estado_sistema != IDLE) {
+		HAL_UART_Transmit(&huart1, (uint8_t *)"Poner sistema en IDLE\n", 22, 1000);
+		return;
+	}
+
+	// Inicio TIM3 para disparar lecturas de ADCs
+	HAL_TIM_Base_Start(&htim3);
+
+	// Verifico offsets de ADCs
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+
+	uint16_t lectura_faseA = (uint16_t)(lecturas_adcs & 0xFFFF) + adc_offsets[0];
+
+	if (abs(FX_ADC_CONST * ((uint16_t)(lectura_faseA - 2048)) > 4000)) {
+		HAL_UART_Transmit(&huart1, (uint8_t *)"Verificar ADC offsets\n", 22, 1000);
+		return;
+	}
+
+	// Con el rotor libre alimento PWM a fase A y fases B y C a GND
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 200);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+
+	// Doy tiempo a que se alinie el rotor y pasen los transitorios de corriente
+	osDelay(pdMS_TO_TICKS(1000));
+
+	// Como el rotor esta libre, ia = id
+	lectura_faseA = (uint16_t)(lecturas_adcs & 0xFFFF) + adc_offsets[0];
+
+	int32_t fx_id0 = FX_ADC_CONST * (lectura_faseA - 2048);
+	int32_t fx_idf = fx_id0;
+	int32_t FX_1_e = fp2fx(0.3679);
+
+	// Luego de leer id(0) elimino la alimentacion y leo la corriente hasta el instante justo despues en que id(t) < id(0)
+
+	// Inicio tim1 para llevar tiempo
+	__HAL_TIM_SET_COUNTER(&htim1, 0);
+	tim1OF = 0;
+	HAL_TIM_Base_Start_IT(&htim1);
+
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+
+	while (fx_idf > ((int64_t)FX_1_e * fx_id0) >> N) {
+		lectura_faseA = (uint16_t)(lecturas_adcs & 0xFFFF) + adc_offsets[0];
+		fx_idf = FX_ADC_CONST * (lectura_faseA - 2048);
+	}
+
+	HAL_TIM_Base_Stop_IT(&htim1);
+	HAL_TIM_Base_Stop(&htim3);
+
+	int32_t fx_tau = fp2fx((double)(__HAL_TIM_GET_COUNTER(&htim1) + tim1OF * 36000) / 72000000.0);
+
+	char cadena[64];
+	int len;
+
+	len = snprintf(cadena, sizeof(cadena), "%ld\n%ld\n%ld\n%ld (Q15.16)\n", fx_id0,
+																			fx_idf,
+																			fx_tau,
+																			(int32_t)((int64_t)fx_tau * FX_Rs) >> N);
+	HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+}
+
+void get_Lq() {
+	if (estado_sistema != IDLE) {
+		HAL_UART_Transmit(&huart1, (uint8_t *)"Poner sistema en IDLE\n", 22, 1000);
+		return;
+	}
+
+	// Inicio TIM3 para disparar lecturas de ADCs
+	HAL_TIM_Base_Start(&htim3);
+
+	// Verifico offsets de ADCs
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+
+	uint16_t lectura_faseA = (uint16_t)(lecturas_adcs & 0xFFFF) + adc_offsets[0];
+
+	if (abs(FX_ADC_CONST * ((uint16_t)(lectura_faseA - 2048)) > 4000)) {
+		HAL_UART_Transmit(&huart1, (uint8_t *)"Verificar ADC offsets\n", 22, 1000);
+		return;
+	}
+
+	// Con el rotor libre alimento PWM a fase A y fases B y C a GND
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 200);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+
+	// Doy tiempo a que se alinie el rotor y pasen los transitorios de corriente
+	osDelay(pdMS_TO_TICKS(1000));
+
+	// Luego de alinear eje d con fase A, hay que dejar flotando la fase A y bloquear el rotor
+	char cadena[64];
+	int len;
+
+	len = snprintf(cadena, sizeof(cadena), "Quitar EN fase A y bloquear rotor. ENTER para seguir\n");
+	HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+	xSemaphoreTake(semaforo_consola, osWaitForever);
+
+	// Alimento solo fase B con fase A flotando hace que id = 0 e iq = 1.155 ib
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 200);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+
+	// Dejo que pasen los transitorios antes de medir
+	osDelay(pdMS_TO_TICKS(1000));
+
+	lectura_faseA = (uint16_t)(lecturas_adcs & 0xFFFF) + adc_offsets[0];
+
+	int32_t fx_iq0 = FX_ADC_CONST * (lectura_faseA - 2048);
+	int32_t fx_iqf = fx_iq0;
+	int32_t FX_1_e = fp2fx(0.3679);
+
+	// Luego de leer iq(0) elimino la alimentacion y leo la corriente hasta el instante justo despues en que iq(t) < iq(0)
+
+	// Inicio tim1 para llevar tiempo
+	__HAL_TIM_SET_COUNTER(&htim1, 0);
+	tim1OF = 0;
+	HAL_TIM_Base_Start_IT(&htim1);
+
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+
+	while (fx_iqf > ((int64_t)FX_1_e * fx_iq0) >> N) {
+		lectura_faseA = (uint16_t)(lecturas_adcs & 0xFFFF) + adc_offsets[0];
+		fx_iqf = FX_ADC_CONST * (lectura_faseA - 2048);
+	}
+
+	HAL_TIM_Base_Stop_IT(&htim1);
+	HAL_TIM_Base_Stop(&htim3);
+
+	int32_t fx_tau = fp2fx((double)(__HAL_TIM_GET_COUNTER(&htim1) + tim1OF * 36000) / 72000000.0);
+
+	len = snprintf(cadena, sizeof(cadena), "%ld\n%ld\n%ld\n%ld (Q15.16)\n", fx_iq0,
+																			fx_iqf,
+																			fx_tau,
+																			(int32_t)((int64_t)fx_tau * FX_Rs) >> N);
+	HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+
 }
 
 

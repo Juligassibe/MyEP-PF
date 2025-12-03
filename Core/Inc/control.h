@@ -92,5 +92,6 @@ extern volatile int32_t overflow_encoder;
 extern uint32_t lecturas_adcs;
 extern controlador_t controlador;
 extern interpolador_t interpolador;
+extern int32_t FX_ALPHA;
 
 #endif /* INC_CONTROL_H_ */
