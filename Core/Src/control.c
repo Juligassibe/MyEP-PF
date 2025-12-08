@@ -7,7 +7,7 @@
 
 #include "control.h"
 
-int32_t FX_PP;
+int32_t FX_LAMBDA;
 int32_t FX_ADC_CONST;
 int32_t FX_360;
 int32_t FX_2_3;
@@ -24,7 +24,7 @@ int32_t FX_I_MIN;
 int32_t FX_ALPHA;
 
 
-volatile int32_t overflow_encoder = -1;
+volatile int32_t overflow_encoder = 0;
 uint32_t lecturas_adcs = 0;
 controlador_t controlador = {0};
 interpolador_t interpolador = {0};
@@ -52,21 +52,18 @@ const int32_t COS[360] = {
 };
 
 void init_controlador(controlador_t *controlador) {
-	controlador->fx_P = fp2fx(1.0);
-	controlador->fx_I = fp2fx(1.0);
-	controlador->fx_D = fp2fx(1.0);
+	controlador->fx_P = fp2fx(PID_P);
+	controlador->fx_I = fp2fx(PID_I);
+	controlador->fx_D = fp2fx(PID_D);
 	controlador->fx_prev_position = 0;
 	controlador->fx_prev_position_error = 0;
 	controlador->fx_proporcional = 0;
 	controlador->fx_integral = 0;
 	controlador->fx_derivativo = 0;
+	controlador->fx_wm = 0;
 
 	controlador->fx_dt = fp2fx(0.001);
 
-	controlador->fx_tau = 1;
-
-	controlador->fx_Pq = fp2fx(1.0);
-	controlador->fx_Pd = fp2fx(1.0);
 	controlador->fx_consigna_torque = 0;
 	controlador->fx_consigna_iq = 0;
 	controlador->fx_consigna_vq = 0;
@@ -74,11 +71,8 @@ void init_controlador(controlador_t *controlador) {
 	controlador->fx_corrienteA = 0;
 	controlador->fx_corrienteB = 0;
 
-	controlador->fx_maxOut = 100;
-	controlador->fx_minOut = 0;
-
 	// Inicio constantes globales
-	FX_PP = fp2fx((double)PP);
+	FX_LAMBDA = fp2fx((double)LAMBDA);
 	FX_ADC_CONST = fp2fx((5.0/(2805-2048)));
 	FX_360 = fp2fx(360.0);
 	FX_2_3 = fp2fx(2.0/3);
@@ -95,6 +89,8 @@ void init_controlador(controlador_t *controlador) {
 	FX_ALPHA = fp2fx(0.03);	// alpha = 1 - lambda en el filtro IIR (no confundir con lambda de flujo concatenado)
 
 	controlador->fx_pid_max = ((int64_t)FX_I_MAX * FX_KT) >> N;
+	controlador->fx_Pq = POLO_CORRIENTE * FX_Lq;
+	controlador->fx_Pd = POLO_CORRIENTE * FX_Ld;
 }
 
 void init_interpolador(interpolador_t *interpolador) {
@@ -105,8 +101,8 @@ void init_interpolador(interpolador_t *interpolador) {
 	interpolador->fx_posicion_final = 0;
 	interpolador->fx_distancia_total = 0;
 	interpolador->fx_consigna_posicion = 0;
-	interpolador->fx_a_max = fp2fx(10800.0);
-	interpolador->fx_v_max = fp2fx(10800.0);
+	interpolador->fx_a_max = fp2fx(30000.0);
+	interpolador->fx_v_max = fp2fx(7200.0);
 	interpolador->fx_t_acc = 0;
 	interpolador->fx_t_const = 0;
 	interpolador->fx_t_total = 0;
@@ -160,19 +156,43 @@ void lazo_corriente() {
 
 	int32_t fx_error_iq = controlador.fx_consigna_iq - fx_corrientes_qd0[0];
 
-	// vq*[n] = Kq * eq[n]
-	controlador.fx_consigna_vq = ((int64_t)controlador.fx_Pq * fx_error_iq) >> N;
+	// vq*[n] = Pq * eq[n] + caida ohmica + desacople id + caida BEMF
+	controlador.fx_consigna_vq = (((int64_t)controlador.fx_Pq * fx_error_iq) >> N) +
+								 (((int64_t)FX_Rs * fx_corrientes_qd0[0]) >> N) +
+								 PP * (((((int64_t)controlador.fx_wm * FX_Ld) >> N) * fx_corrientes_qd0[1]) >> N) +
+								 PP * (((int64_t)FX_LAMBDA * controlador.fx_wm) >> N);
 
-	// vd*[n] = Kd * (-id[n])   ed[n] = -id[n] ya que mi consigna de id es 0
-	controlador.fx_consigna_vd = ((int64_t)controlador.fx_Pd * (-fx_corrientes_qd0[1])) >> N;
+	/*
+	 * vd*[n] = Pd * (-id[n]) + caida ohmica + desacople iq
+	 * ed[n] = -id[n] ya que mi consigna de id es 0
+	 */
+
+	controlador.fx_consigna_vd = (((int64_t)controlador.fx_Pd * (-fx_corrientes_qd0[1])) >> N) +
+								 (((int64_t)FX_Rs * fx_corrientes_qd0[1]) >> N) +
+								 PP * (((((int64_t)controlador.fx_wm * FX_Lq) >> N) * fx_corrientes_qd0[0]) >> N);
 
 	// CHECKEAR QUE LAS CUENTAS SEAN VALIDAS
 	// T.inv. Park
-	// va = vq * cos(tita) + vd * sin(tita)
-	int32_t fx_consigna_va = (((int64_t)controlador.fx_consigna_vq * COS[(LUT_index_cos > 359) ? (719 - LUT_index_cos) : (LUT_index_cos)]) >> N) +
-							 (((int64_t)controlador.fx_consigna_vd * COS[(LUT_index_sin > 359) ? (719 - LUT_index_sin) : (LUT_index_sin)]) >> N);
+	// va = vq * -sin(tita) + vd * cos(tita)
+	int32_t fx_consigna_va = ((-(int64_t)controlador.fx_consigna_vq * COS[(LUT_index_sin > 359) ? (719 - LUT_index_sin) : (LUT_index_sin)]) >> N) +
+							  (((int64_t)controlador.fx_consigna_vd * COS[(LUT_index_cos > 359) ? (719 - LUT_index_cos) : (LUT_index_cos)]) >> N);
 
 	// Adelantar 240 es igual que atrasar 120
+	LUT_index_cos -= 240;
+	LUT_index_sin -= 240;
+
+	if (LUT_index_cos < 0) {
+		LUT_index_cos += 720;
+	}
+
+	if (LUT_index_sin < 0) {
+		LUT_index_sin += 720;
+	}
+	// vb = vq * -sin(tita-2pi/3) + vd * cos(tita-2pi/3)
+	int32_t fx_consigna_vb = ((-(int64_t)controlador.fx_consigna_vq * COS[(LUT_index_sin > 359) ? (719 - LUT_index_sin) : (LUT_index_sin)]) >> N) +
+			 	 	 	 	  (((int64_t)controlador.fx_consigna_vd * COS[(LUT_index_cos > 359) ? (719 - LUT_index_cos) : (LUT_index_cos)]) >> N);
+
+	// Adelanto 240, 240-120=120, adelanta 120
 	LUT_index_cos += 480;
 	LUT_index_sin += 480;
 
@@ -183,29 +203,18 @@ void lazo_corriente() {
 	if (LUT_index_sin > 719) {
 		LUT_index_sin -= 720;
 	}
-	// vb = vq * cos(tita-2pi/3) + vd * sin(tita-2pi/3)
-	int32_t fx_consigna_vb = (((int64_t)controlador.fx_consigna_vq * COS[(LUT_index_cos > 359) ? (719 - LUT_index_cos) : (LUT_index_cos)]) >> N) +
-			 	 	 	 	 (((int64_t)controlador.fx_consigna_vd * COS[(LUT_index_sin > 359) ? (719 - LUT_index_sin) : (LUT_index_sin)]) >> N);
-
-	// Atraso 120, 240-120=120, adelanta 120
-	LUT_index_cos -= 241;
-	LUT_index_sin -= 241;
-
-	if (LUT_index_cos < 0) {
-		LUT_index_cos += 720;
-	}
-
-	if (LUT_index_sin < 0) {
-		LUT_index_sin += 720;
-	}
-	// vc = vq * cos(tita+2pi/3) + vd * sin(tita+2pi/3)
-	int32_t fx_consigna_vc = (((int64_t)controlador.fx_consigna_vq * COS[(LUT_index_cos > 359) ? (719 - LUT_index_cos) : (LUT_index_cos)]) >> N) +
-			 	 	 	 	 (((int64_t)controlador.fx_consigna_vd * COS[(LUT_index_sin > 359) ? (719 - LUT_index_sin) : (LUT_index_sin)]) >> N);
+	// vc = vq * -sin(tita+2pi/3) + vd * cos(tita+2pi/3)
+	int32_t fx_consigna_vc = ((-(int64_t)controlador.fx_consigna_vq * COS[(LUT_index_sin > 359) ? (719 - LUT_index_sin) : (LUT_index_sin)]) >> N) +
+			 	 	 	 	  (((int64_t)controlador.fx_consigna_vd * COS[(LUT_index_cos > 359) ? (719 - LUT_index_cos) : (LUT_index_cos)]) >> N);
 
 	// Hago SPWM
-	htim3.Instance->CCR1 = ((float)(FX_1_2 + ((int64_t)fx_consigna_va << N) / FX_V_CC) / (1 << N)) * htim3.Instance->ARR;
-	htim3.Instance->CCR2 = ((float)(FX_1_2 + ((int64_t)fx_consigna_vb << N) / FX_V_CC) / (1 << N)) * htim3.Instance->ARR;
-	htim3.Instance->CCR3 = ((float)(FX_1_2 + ((int64_t)fx_consigna_vc << N) / FX_V_CC) / (1 << N)) * htim3.Instance->ARR;
+	int32_t fx_duty_a = (FX_1_2 + ((int64_t)fx_consigna_va << N) / FX_V_CC);
+	int32_t fx_duty_b = (FX_1_2 + ((int64_t)fx_consigna_vb << N) / FX_V_CC);
+	int32_t fx_duty_c = (FX_1_2 + ((int64_t)fx_consigna_vc << N) / FX_V_CC);
+
+	htim3.Instance->CCR1 = fx_duty_a * htim3.Instance->ARR / (1 << N);
+	htim3.Instance->CCR2 = fx_duty_b * htim3.Instance->ARR / (1 << N);
+	htim3.Instance->CCR3 = fx_duty_c * htim3.Instance->ARR / (1 << N);
 }
 
 void lazo_posicion() {
@@ -218,7 +227,7 @@ void lazo_posicion() {
 	int32_t fx_position = get_fx_position();
 
 	// Velocidad del rotor
-	int32_t fx_wm = ((int64_t)(fx_position - controlador.fx_prev_position) * FX_1_dt) >> N;
+	controlador.fx_wm = ((int64_t)(fx_position - controlador.fx_prev_position) * FX_1_dt) >> N;
 
 	// LAZO CONTROL DE POSICION PI + D
 
@@ -233,10 +242,10 @@ void lazo_posicion() {
 	// I[n] = Ki * dt * (e[n] - e[n-1]) / 2 + I[n-1]
 	int64_t tempI = ((int64_t)controlador.fx_I * controlador.fx_dt) >> N;
 	tempI = (tempI * (fx_error_pos - controlador.fx_prev_position_error)) >> N;
-	controlador.fx_integral += (int32_t)((tempI >> 1) >> N);
+	controlador.fx_integral += (int32_t)(tempI >> 1);
 
 	// D[n] = Kd * (-wm) (No hago parte derivativa con el error por ser PI + D)
-	controlador.fx_derivativo = ((int64_t)controlador.fx_D * (-fx_wm)) >> N;
+	controlador.fx_derivativo = ((int64_t)controlador.fx_D * (-controlador.fx_wm)) >> N;
 
 	// Antiwindup del integrador
 	int32_t fx_integral_max, fx_integral_min;
@@ -266,7 +275,7 @@ void lazo_posicion() {
 	// T*[n] = P[n] + I[n] + D[n]
 	controlador.fx_consigna_torque = controlador.fx_proporcional + controlador.fx_integral + controlador.fx_derivativo;
 
-	// Clamping de la salida
+	// Clamping de la salida por si hay saturacion por accion P o D
 	if (controlador.fx_consigna_torque > controlador.fx_pid_max) {
 		controlador.fx_consigna_torque = controlador.fx_pid_max;
 	}
@@ -282,11 +291,11 @@ void lazo_posicion() {
 int32_t get_corrientes_qd0(int32_t *corrientes) {
 	int32_t fx_rotor_position = get_fx_position();
 
-	uint16_t lectura_faseA = (uint16_t)(lecturas_adcs & 0xFFFF) + adc_offsets[0];
-	uint16_t lectura_faseB = (uint16_t)((lecturas_adcs >> 16) & 0xFFFF) + adc_offsets[1];
+	uint16_t lectura_faseA = (uint16_t)(lecturas_adcs & 0xFFFC) + adc_offsets[0];
+	uint16_t lectura_faseB = (uint16_t)((lecturas_adcs >> 16) & 0xFFFC) + adc_offsets[1];
 
-	lectura_faseA &= 0xFFFC;
-	lectura_faseB &= 0xFFFC;
+//	lectura_faseA &= 0xFFFC;
+//	lectura_faseB &= 0xFFFC;
 
 	// La lectura nueva del ADC seria xn en el filtro IIR
 	int32_t fx_xnA = FX_ADC_CONST * (lectura_faseA - 2048);
@@ -314,16 +323,25 @@ int32_t get_corrientes_qd0(int32_t *corrientes) {
 		BaseType_t tarea_mayor_prioridad = pdFALSE;
 		xQueueSendFromISR(cola_estados, &mensaje, &tarea_mayor_prioridad);
 		portYIELD_FROM_ISR(tarea_mayor_prioridad);
-//		osMessageQueuePut(cola_estadosHandle, &mensaje, 9, 1000);
 	}
 
-	// La T. Park la calculo con el angulo electrico Tita_e = Pp * Tita_r
-	// PP * tita_rotor = tita_electrico, como PP = 4, es igual a hacer << 2
-	int32_t fx_LUT_index = (fx_rotor_position << 2) % FX_360;
-	float fp_LUT_index = ((float)fx_LUT_index / (1 << N));
+	/*
+	 * La T. Park la calculo con el angulo electrico Tita_e = Pp * Tita_r
+	 * Como PP = 4, es igual a hacer << 2
+	 * Multiplico por 2 por que el elemento 360 de la LUT es cos(180)
+	 */
+	int32_t fx_LUT_index = ((fx_rotor_position << 2) % FX_360) * 2;
+//	float fp_LUT_index = ((float)fx_LUT_index / (1 << N));
 
-	// Multiplico por 2 por que el elemento 360 de la LUT es cos(180)
-	int16_t LUT_index1 = (int16_t)(fp_LUT_index * 2);
+	// Redondeo al entero mas cercanox
+	if (fx_LUT_index > 0){
+		fx_LUT_index += 32768;
+	}
+	else{
+		fx_LUT_index -= 32768;
+	}
+
+	int16_t LUT_index1 = (int16_t)(fx_LUT_index / (1 << N));
 
 	// Llevo a angulo positivo
 	if (LUT_index1 < 0) {
@@ -383,18 +401,18 @@ void interpolar() {
 	// Si hay consigna nueva modifico parametros del perfil
 	if (interpolador.nueva) {
 		interpolador.fx_posicion_inicial = get_fx_position();
-		interpolador.fx_v_max = fp2fx(360.0);
 
 		int32_t desplazamiento = interpolador.fx_posicion_final - interpolador.fx_posicion_inicial;
 		interpolador.fx_distancia_total = desplazamiento > 0 ? desplazamiento : (-desplazamiento);
 
-		// t_acc = v_max / a_max = 1 inicialmente (65536 en Q15.16)
-		int32_t fx_t_acc = 65536;
-		// d_acc = 2 * 0.5 * a_max * t_acc^2 = 10800 inicialmente (707788800 en Q15.16)
-		int32_t fx_distancia_acc = 707788800;
+		// t_acc = v_max / a_max = 0.24 (15728 en Q15.16)
+		const int32_t fx_t_acc = 15728;
+		// d_acc = 2 * 0.5 * a_max * t_acc^2 = 622 inicialmente (40763392 en Q15.16)
+		const int32_t fx_distancia_acc = 40763392;
 
 		// Perfil triangular de velocidad
 		if (fx_distancia_acc >= interpolador.fx_distancia_total) {
+			// t_acc = sqrt((d_acc * 2) / a_max))
 			interpolador.fx_t_acc = mi_sqrt(((int64_t)interpolador.fx_distancia_total << N) / interpolador.fx_a_max) << 8;
 			interpolador.fx_t_const = 0;
 			interpolador.fx_v_max = (((int64_t)interpolador.fx_a_max * interpolador.fx_t_acc) >> N);
@@ -403,7 +421,8 @@ void interpolar() {
 		// Perfil trapezoidal de velocidad
 		else {
 			interpolador.fx_t_acc = fx_t_acc;
-			interpolador.fx_t_const = (((int64_t)(interpolador.fx_distancia_total - fx_distancia_acc)) << N) / interpolador.fx_v_max;
+			// t_const = d_const / v_max = (d_total - 2*d_acc) / v_max
+			interpolador.fx_t_const = (((int64_t)(interpolador.fx_distancia_total - (fx_distancia_acc << 1))) << N) / interpolador.fx_v_max;
 		}
 
 		interpolador.fx_t0 = 0;
@@ -459,10 +478,11 @@ uint32_t mi_sqrt(uint64_t numero) {
 }
 
 int32_t get_fx_position() {
-	int32_t steps = (overflow_encoder < 0 ? (-65536) : (0)) + __HAL_TIM_GET_COUNTER(&htim2) +
-					(overflow_encoder < 0 ? (overflow_encoder + 1) : (overflow_encoder)) * 65536;
+//	int32_t steps = (overflow_encoder < 0 ? (-65536) : (0)) + __HAL_TIM_GET_COUNTER(&htim2) +
+//					(overflow_encoder < 0 ? (overflow_encoder + 1) : (overflow_encoder)) * 65536;
+	int32_t steps = __HAL_TIM_GET_COUNTER(&htim2) - 32768;
 
-	return fp2fx(steps * 360.0 / 2400);
+	return fp2fx(steps * 0.15);
 }
 
 HAL_StatusTypeDef alinear_rotor() {
@@ -483,60 +503,56 @@ HAL_StatusTypeDef alinear_rotor() {
 
 void init_lazos_control() {
 	// Habilito interrupciones para empezar a ejecutar lazos de control
-//	HAL_StatusTypeDef error;
-//	char cadena[16];
-//	int len;
-//
-//	error = HAL_TIM_Base_Start(&htim1);
-//
-//	if (error != HAL_OK) {
-//		len = snprintf(cadena, sizeof(cadena), "E: Timer 1 (%d)\n", error);
-//		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-//		return;
-//	}
-//
-//	error = HAL_TIM_Base_Start(&htim3);
-//
-//	if (error != HAL_OK) {
-//		HAL_TIM_Base_Stop_IT(&htim1);
-//		len = snprintf(cadena, sizeof(cadena), "E: Timer 3 (%d)\n", error);
-//		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-//		return;
-//	}
+	HAL_StatusTypeDef error;
+	char cadena[16];
+	int len;
+
+	error = HAL_TIM_Base_Start_IT(&htim1);
+
+	if (error != HAL_OK) {
+		len = snprintf(cadena, sizeof(cadena), "E: Timer 1 (%d)\n", error);
+		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+		return;
+	}
+
+	__HAL_TIM_SET_COUNTER(&htim3, 0);
+	error = HAL_TIM_Base_Start_IT(&htim3);
+
+	if (error != HAL_OK) {
+		HAL_TIM_Base_Stop_IT(&htim1);
+		len = snprintf(cadena, sizeof(cadena), "E: Timer 3 (%d)\n", error);
+		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+		return;
+	}
 
 	mensaje_t mensaje = {
-		.estado = READY
+		.estado = CLOSED_LOOP
 	};
 
 	xQueueSend(cola_estados, &mensaje, 1000);
-
-	__HAL_TIM_SET_COUNTER(&htim1, 0);
-	__HAL_TIM_SET_COUNTER(&htim3, 0);
-	__HAL_TIM_ENABLE_IT(&htim1, TIM_IT_UPDATE);
-	__HAL_TIM_ENABLE_IT(&htim3, TIM_IT_UPDATE);
 }
 
 void deinit_lazos_control() {
 	// Deshabilito interrupciones para dejar de ejecutar lazos de control
-//	HAL_StatusTypeDef error;
-//	char cadena[16];
-//	int len;
-//
-//	error = HAL_TIM_Base_Stop_IT(&htim1);
-//
-//	if (error != HAL_OK) {
-//		len = snprintf(cadena, sizeof(cadena), "E: Timer 1 (%d)\n", error);
-//		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-//		return;
-//	}
-//
-//	error = HAL_TIM_Base_Stop_IT(&htim3);
-//
-//	if (error != HAL_OK) {
-//		len = snprintf(cadena, sizeof(cadena), "E: Timer 3 (%d)\n", error);
-//		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-//		return;
-//	}
+	HAL_StatusTypeDef error;
+	char cadena[16];
+	int len;
+
+	error = HAL_TIM_Base_Stop_IT(&htim1);
+
+	if (error != HAL_OK) {
+		len = snprintf(cadena, sizeof(cadena), "E: Timer 1 (%d)\n", error);
+		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+		return;
+	}
+
+	error = HAL_TIM_Base_Stop_IT(&htim3);
+
+	if (error != HAL_OK) {
+		len = snprintf(cadena, sizeof(cadena), "E: Timer 3 (%d)\n", error);
+		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+		return;
+	}
 
 	mensaje_t mensaje = {
 		.estado = IDLE,
@@ -544,9 +560,6 @@ void deinit_lazos_control() {
 	};
 
 	xQueueSend(cola_estados, &mensaje, 1000);
-
-	__HAL_TIM_DISABLE_IT(&htim1, TIM_IT_UPDATE);
-	__HAL_TIM_DISABLE_IT(&htim3, TIM_IT_UPDATE);
 }
 
 void get_Ld() {

@@ -45,14 +45,13 @@ typedef enum estados_e {
 	INIT,
 	NOT_INIT,
 	IDLE,
-	READY,
 	CLOSED_LOOP,
 	FAULT
 } estados_e;
 
 typedef enum origen_e {
 	CORRIENTES,
-	ENCODER,
+	ENC_INIT,
 	ADC1_CAL,
 	ADC2_CAL,
 	ADC_MM,
@@ -66,7 +65,8 @@ typedef enum origen_e {
 	PWM2,
 	PWM3,
 	UART_RX,
-	CLI
+	CLI,
+	ENC_OVERFLOW
 } origen_e;
 
 typedef struct mensaje_t {

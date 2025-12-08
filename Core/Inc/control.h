@@ -20,7 +20,11 @@
 #define FX_MAX 			(1 << M) - 1
 #define FX_MIN 	   		-(1 << M)
 #define PP				4			// Pares de polos
-#define LAMBDA			0.0014			// Flujo concatenado
+#define LAMBDA			0.0014	    // Flujo concatenado
+#define POLO_CORRIENTE  5000		// Polo lazos de corriente s = -5000
+#define PID_P			0.1745		// Nm / grado
+#define PID_I			173.5329	// Nm / grado . s
+#define PID_D			0.0007 		// Nm / grado / s
 
 typedef struct {
 	// Lazo posicion
@@ -32,11 +36,9 @@ typedef struct {
 	int32_t fx_proporcional;
 	int32_t fx_integral;
 	int32_t fx_derivativo;
+	int32_t fx_wm;
 
 	int32_t fx_dt;
-
-	// Filtro LP
-	int32_t fx_tau;
 
 	// Lazo corriente
 	int32_t fx_Pq;
@@ -45,12 +47,8 @@ typedef struct {
 	int32_t fx_consigna_iq;
 	int32_t fx_consigna_vq;
 	int32_t fx_consigna_vd;
-	int32_t fx_corrienteA; 	// Guardo corrientes en n-1 para filtro IIR
+	int32_t fx_corrienteA; 	// Guardo corrientes [n-1] para filtro IIR
 	int32_t fx_corrienteB;
-
-	// Saturacion de la salida
-	int32_t fx_maxOut;
-	int32_t fx_minOut;
 
 	// Output clamping
 	int32_t fx_pid_max;

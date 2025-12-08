@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "control.h"
 #include "mt6835.h"
@@ -69,7 +70,7 @@ osThreadId_t state_machineHandle;
 const osThreadAttr_t state_machine_attributes = {
   .name = "state_machine",
   .stack_size = 96 * 4,
-  .priority = (osPriority_t) osPriorityRealtime,
+  .priority = (osPriority_t) osPriorityRealtime7,
 };
 /* Definitions for cli */
 osThreadId_t cliHandle;
@@ -78,19 +79,12 @@ const osThreadAttr_t cli_attributes = {
   .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for lc_posicion */
-osThreadId_t lc_posicionHandle;
-const osThreadAttr_t lc_posicion_attributes = {
-  .name = "lc_posicion",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityRealtime7,
-};
-/* Definitions for lc_corriente */
-osThreadId_t lc_corrienteHandle;
-const osThreadAttr_t lc_corriente_attributes = {
-  .name = "lc_corriente",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityRealtime7,
+/* Definitions for test_task */
+osThreadId_t test_taskHandle;
+const osThreadAttr_t test_task_attributes = {
+  .name = "test_task",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityRealtime,
 };
 /* USER CODE BEGIN PV */
 
@@ -120,7 +114,7 @@ static void MX_TIM2_Init(void);
 static void MX_TIM1_Init(void);
 void sm(void *argument);
 void consola(void *argument);
-void control_posicion(void *argument);
+void test(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -170,11 +164,6 @@ int main(void)
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
 
-  semaforo_consola = xSemaphoreCreateBinary();
-  semaforo_adc = xSemaphoreCreateBinary();
-  semaforo_posicion = xSemaphoreCreateBinary();
-  cola_estados = xQueueCreate(3, sizeof(mensaje_t));
-
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -186,6 +175,11 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
 	/* add semaphores, ... */
+
+  semaforo_consola = xSemaphoreCreateBinary();
+  semaforo_adc = xSemaphoreCreateBinary();
+  semaforo_posicion = xSemaphoreCreateBinary();
+
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* USER CODE BEGIN RTOS_TIMERS */
@@ -195,6 +189,9 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_QUEUES */
 	/* add queues, ... */
+
+  cola_estados = xQueueCreate(3, sizeof(mensaje_t));
+
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -204,8 +201,8 @@ int main(void)
   /* creation of cli */
   cliHandle = osThreadNew(consola, NULL, &cli_attributes);
 
-  /* creation of lc_posicion */
-  lc_posicionHandle = osThreadNew(control_posicion, NULL, &lc_posicion_attributes);
+  /* creation of test_task */
+  test_taskHandle = osThreadNew(test, NULL, &test_task_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
@@ -231,11 +228,7 @@ int main(void)
     /* Infinite loop */
 	while (1) {
     /* USER CODE END WHILE */
-//		get_corrientes_qd0(corrientes);
-//
-//		len = snprintf(cadena, sizeof(cadena), "%ld, %ld\n", corrientes[0], corrientes[1]);
-//		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-//		HAL_Delay(500);
+
     /* USER CODE BEGIN 3 */
 	}
   /* USER CODE END 3 */
@@ -301,7 +294,6 @@ static void MX_ADC1_Init(void)
 
   ADC_MultiModeTypeDef multimode = {0};
   ADC_ChannelConfTypeDef sConfig = {0};
-  ADC_InjectionConfTypeDef sConfigInjected = {0};
 
   /* USER CODE BEGIN ADC1_Init 1 */
 
@@ -338,21 +330,6 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
-
-  /** Configure Injected Channel
-  */
-  sConfigInjected.InjectedChannel = ADC_CHANNEL_2;
-  sConfigInjected.InjectedRank = ADC_INJECTED_RANK_1;
-  sConfigInjected.InjectedNbrOfConversion = 1;
-  sConfigInjected.InjectedSamplingTime = ADC_SAMPLETIME_239CYCLES_5;
-  sConfigInjected.ExternalTrigInjecConv = ADC_INJECTED_SOFTWARE_START;
-  sConfigInjected.AutoInjectedConv = DISABLE;
-  sConfigInjected.InjectedDiscontinuousConvMode = DISABLE;
-  sConfigInjected.InjectedOffset = 0;
-  if (HAL_ADCEx_InjectedConfigChannel(&hadc1, &sConfigInjected) != HAL_OK)
-  {
-    Error_Handler();
-  }
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
@@ -372,7 +349,6 @@ static void MX_ADC2_Init(void)
   /* USER CODE END ADC2_Init 0 */
 
   ADC_ChannelConfTypeDef sConfig = {0};
-  ADC_InjectionConfTypeDef sConfigInjected = {0};
 
   /* USER CODE BEGIN ADC2_Init 1 */
 
@@ -401,20 +377,6 @@ static void MX_ADC2_Init(void)
   sConfig.Rank = ADC_REGULAR_RANK_1;
   sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Injected Channel
-  */
-  sConfigInjected.InjectedChannel = ADC_CHANNEL_3;
-  sConfigInjected.InjectedRank = ADC_INJECTED_RANK_1;
-  sConfigInjected.InjectedNbrOfConversion = 1;
-  sConfigInjected.InjectedSamplingTime = ADC_SAMPLETIME_239CYCLES_5;
-  sConfigInjected.AutoInjectedConv = DISABLE;
-  sConfigInjected.InjectedDiscontinuousConvMode = DISABLE;
-  sConfigInjected.InjectedOffset = 0;
-  if (HAL_ADCEx_InjectedConfigChannel(&hadc2, &sConfigInjected) != HAL_OK)
   {
     Error_Handler();
   }
@@ -579,7 +541,7 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 2;
   htim3.Init.CounterMode = TIM_COUNTERMODE_CENTERALIGNED1;
-  htim3.Init.Period = 799;
+  htim3.Init.Period = 1199;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -751,7 +713,7 @@ void init_sistema() {
 
 	if (error != HAL_OK) {
 		mensaje.estado = FAULT;
-		mensaje.origen = ENCODER;
+		mensaje.origen = ENC_INIT;
 		mensaje.error = error;
 		xQueueSend(cola_estados, &mensaje, 1000);
 		return;
@@ -798,49 +760,7 @@ void init_sistema() {
 		return;
 	}
 
-	// Conversiones injected para ver zero offsets de ADCs
-	error = HAL_ADCEx_InjectedStart_IT(&hadc1);
-
-	if (error != HAL_OK) {
-		mensaje.estado = FAULT;
-		mensaje.origen = ADC1_INJ;
-		mensaje.error = error;
-		xQueueSend(cola_estados, &mensaje, 1000);
-		return;
-	}
-
-	error = HAL_ADCEx_InjectedStart_IT(&hadc2);
-
-	if (error != HAL_OK) {
-		mensaje.estado = FAULT;
-		mensaje.origen = ADC2_INJ;
-		mensaje.error = error;
-		xQueueSend(cola_estados, &mensaje, 1000);
-		return;
-	}
-
-	// Timer 1 para lazo de posicion (sin IT todavia)
-	error = HAL_TIM_Base_Start(&htim1);
-
-	if (error != HAL_OK) {
-		mensaje.estado = FAULT;
-		mensaje.origen = TIMER1;
-		mensaje.error = error;
-		xQueueSend(cola_estados, &mensaje, 1000);
-		return;
-	}
-
 	// Timer 3 para PWM de las fases
-	error = HAL_TIM_Base_Start(&htim3);
-
-	if (error != HAL_OK) {
-		mensaje.estado = FAULT;
-		mensaje.origen = TIMER3;
-		mensaje.error = error;
-		xQueueSend(cola_estados, &mensaje, 1000);
-		return;
-	}
-
 	error = HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 
 	if (error != HAL_OK) {
@@ -897,7 +817,7 @@ void init_sistema() {
 	if (error != HAL_OK) {
 		mensaje.estado = FAULT;
 		// Encoder no devuelve 0x55 luego de enviar comando para hacer zero
-		mensaje.origen = ENCODER;
+		mensaje.origen = ENC_INIT;
 		mensaje.error = error;
 		xQueueSend(cola_estados, &mensaje, 1000);
 	}
@@ -912,8 +832,10 @@ void init_sistema() {
 		xQueueSend(cola_estados, &mensaje, 1000);
 		return;
 	}
+
+	// Pongo el 0 de la posicion en la mitad del timer para tener valores positivos y negativos
+	__HAL_TIM_SET_COUNTER(&htim2, 32768);
 	__HAL_TIM_ENABLE_IT(&htim2, TIM_IT_UPDATE);
-	__HAL_TIM_SET_COUNTER(&htim2, 0);
 
 	// Luego de hacer 0, hago las corrientes 0 para calibrar ADCs
 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
@@ -935,15 +857,18 @@ void fault_handler(mensaje_t *mensaje) {
 			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
 			HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
 			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+
+			HAL_TIM_Base_Stop(&htim3);
 			__HAL_TIM_DISABLE_IT(&htim3, TIM_IT_UPDATE);
 
+			HAL_TIM_Base_Stop(&htim1);
 			__HAL_TIM_DISABLE_IT(&htim1, TIM_IT_UPDATE);
 
 			len = snprintf(cadena, sizeof(cadena), "E: SOBRECORRIENTE\n");
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
-		case ENCODER:
+		case ENC_INIT:
 			len = snprintf(cadena, sizeof(cadena), "E: Encoder:\n%u\n%u\n%u\n%u\n%u\n%u\n", hencoder.abz_res, hencoder.abz_swap, hencoder.z_edge,
 																							hencoder.z_width, hencoder.z_phase, hencoder.rot_dir);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
@@ -1007,6 +932,15 @@ void fault_handler(mensaje_t *mensaje) {
 		case UART_RX:
 			len = snprintf(cadena, sizeof(cadena), "E: UART RX (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+			break;
+
+		case CLI:
+			HAL_UART_Transmit(&huart1, (uint8_t *)"E: CLI\n", 7, 1000);
+			break;
+
+		case ENC_OVERFLOW:
+			HAL_UART_Transmit(&huart1, (uint8_t *)"E: Overflow encoder\n", 20, 1000);
+			break;
 
 		default:
 			HAL_UART_Transmit(&huart1, (uint8_t *)"Error desconocido.\n", 19, 1000);
@@ -1052,19 +986,6 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
 	__HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT);
 }
 
-void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef* hadc) {
-	uint16_t inj_conv1 = (uint16_t)(hadc->Instance->DR & 0xFFFF);
-	uint16_t inj_conv2 = (uint16_t)((hadc->Instance->DR >> 16) & 0xFFFF);
-
-//	adc_offsets[0] = 2048 - inj_conv1;
-//	adc_offsets[1] = 2048 - inj_conv2;
-
-	// Mismo filtro IIR que para lecturas de corriente
-//	adc_offsets[0] = adc_offsets[0] + (((int64_t)FX_ALPHA * ((2048 - inj_conv1) - adc_offsets[0])) >> 16);
-//	adc_offsets[1] = adc_offsets[1] + (((int64_t)FX_ALPHA * ((2048 - inj_conv2) - adc_offsets[1])) >> 16);
-}
-
-
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_sm */
@@ -1093,24 +1014,21 @@ void sm(void *argument)
 				break;
 
 			case NOT_INIT:
-				HAL_UART_Transmit(&huart1, (uint8_t *)"Error, reiniciar\n", 17, 1000);
+				HAL_UART_Transmit(&huart1, (uint8_t *)"Error al iniciar, reiniciar\n", 28, 1000);
 				break;
 
 			case IDLE:
 				if (mensaje.origen == 0) {
-					HAL_UART_Transmit(&huart1, (uint8_t *)"Sistema iniciado\n", 17, 1000);
+					HAL_UART_Transmit(&huart1, (uint8_t *)"Inicio listo\n", 13, 1000);
 					xSemaphoreGive(semaforo_consola);
 				}
 				else {
-					HAL_UART_Transmit(&huart1, (uint8_t *)"Lazos de control parados\n", 25, 1000);
+					HAL_UART_Transmit(&huart1, (uint8_t *)"Lazos de control detenidos\n", 27, 1000);
 				}
 				break;
 
-			case READY:
-				HAL_UART_Transmit(&huart1, (uint8_t *)"Lazos de control iniciados\n", 27, 1000);
-				break;
-
 			case CLOSED_LOOP:
+				HAL_UART_Transmit(&huart1, (uint8_t *)"Lazos de control iniciados\n", 27, 1000);
 				break;
 
 			case FAULT:
@@ -1143,20 +1061,17 @@ void consola(void *argument)
 	// No ejecuto la tarea hasta que termina el inicio del sistema
 	xSemaphoreTake(semaforo_consola, osWaitForever);
 
-	const char menu[] = "\n1. Ver estado del sistema\n"
-						"2. Iniciar lazos de control\n"
-						"3. Parar lazos de control\n"
-						"4. Consigna nueva\n"
-						"5. Posicion del rotor (Q15.16)\n"
-						"6. Calibrar ADCs\n"
-						"7. Obtener Ld\n"
-						"8. Obtener Lq\n"
-						">> ";
-	int len_menu = strlen(menu);
+	const char menu[] = "\n1. Estado del sistema\n"
+					"2. Iniciar lazos de control\n"
+					"3. Parar lazos de control\n"
+					"4. Nueva consigna\n"
+					"5. Obtener posicion\n"
+					"6. Offsets ADCs\n"
+					">> ";
 
-	uint8_t comando;
+	uint16_t len_menu = strlen(menu);
 
-	char cadena[32];
+	char cadena[64];
 	int len;
 
 	/* Infinite loop */
@@ -1165,69 +1080,66 @@ void consola(void *argument)
 
 		xSemaphoreTake(semaforo_consola, osWaitForever);
 
-		comando = atoi((char *)buffer_rx);
-
-		switch (comando) {
-			case 1:
-				len = snprintf(cadena, sizeof(cadena), "Estado: %u\n", estado_sistema);
+		switch (buffer_rx[0]) {
+			case '1':
+				len = snprintf(cadena, sizeof(cadena), "Estado: %u", estado_sistema);
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 
-			case 2:
+			case '2':
 				init_lazos_control();
 				break;
 
-			case 3:
+			case '3':
 				deinit_lazos_control();
 				break;
 
-			case 4:
-				len = snprintf(cadena, sizeof(cadena), "Ej: P123.45\n");
-				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-				len = snprintf(cadena, sizeof(cadena), "ENTER para cancelar\n>>");
+			case '4':
+				len = snprintf(cadena, sizeof(cadena), "Ej: 123.45\nENTER para cancelar\n>> ");
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				xSemaphoreTake(semaforo_consola, osWaitForever);
 
-				if ((char)buffer_rx[0] == '\0') {
-					len = snprintf(cadena, sizeof(cadena), "Cancelado\n");
-					HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+				if (buffer_rx[0] == '\0') {
+					HAL_UART_Transmit(&huart1, (uint8_t *)"Cancelado\n", 10, 1000);
 				}
-				else if ((char)buffer_rx[0] != 'P'){
-					len = snprintf(cadena, sizeof(cadena), "Comando desconocido\n");
-					HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-				}
-				else {
-					int32_t fx_nueva_consigna = fp2fx(strtod((char *)&buffer_rx[1], NULL));
+
+				else if (isdigit(buffer_rx[0])) {
+					int32_t fx_nueva_consigna = fp2fx(strtod((char *)buffer_rx, NULL));
 					len = snprintf(cadena, sizeof(cadena), "%ld\n", fx_nueva_consigna);
 					HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 					set_posicion_final_nueva(fx_nueva_consigna);
 				}
-				// VERIFICAR TASKENTERCRITICAL() Y TASKEXITCRITICAL()
+
+				else {
+					HAL_UART_Transmit(&huart1, (uint8_t *)"Consigna no valida\n", 19, 1000);
+				}
+
 				break;
 
-			case 5:
+			case '5':
 				len = snprintf(cadena, sizeof(cadena), "Posicion: %ld (Q15.16)\n", get_fx_position());
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 
-			case 6:
+			case '6':
 				get_adc_offsets();
 				len = snprintf(cadena, sizeof(cadena), "Offsets: %d, %d\n", adc_offsets[0], adc_offsets[1]);
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 
-			case 7:
+			case '7':
 				get_Ld();
 				break;
 
-			case 8:
+			case '8':
 				get_Lq();
 				break;
 
-			case 9:
+			case '9':
 				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1) > 0 ? 0 : 200);
 				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
 				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+				break;
 
 			default:
 				len = snprintf(cadena, sizeof(cadena), "RX: %s\n", (char *)buffer_rx);
@@ -1239,22 +1151,40 @@ void consola(void *argument)
   /* USER CODE END consola */
 }
 
-/* USER CODE BEGIN Header_control_posicion */
+/* USER CODE BEGIN Header_test */
 /**
-* @brief Function implementing the lc_posicion thread.
+* @brief Function implementing the test_task thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_control_posicion */
-void control_posicion(void *argument)
+/* USER CODE END Header_test */
+void test(void *argument)
 {
-  /* USER CODE BEGIN control_posicion */
+  /* USER CODE BEGIN test */
+	osDelay(osWaitForever);
+	int32_t corrientes[2];
+	char cadena[64];
+	int len;
+//
+//	uint32_t fin;
+	HAL_TIM_Base_Start(&htim3);
+//	HAL_TIM_Base_Start(&htim3);
+	get_adc_offsets();
   /* Infinite loop */
 	while (1) {
-		xSemaphoreTake(semaforo_posicion, portMAX_DELAY);
-		lazo_posicion();
+//		tim1OF = 0;
+//		__HAL_TIM_SET_COUNTER(&htim1, 0);
+		get_corrientes_qd0(corrientes);
+//		fin = __HAL_TIM_GET_COUNTER(&htim1);
+//
+		len = snprintf(cadena, sizeof(cadena), "%ld, %ld\n", corrientes[0], corrientes[1]);
+		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
+//
+		osDelay(pdMS_TO_TICKS(10));
+//		xSemaphoreTake(semaforo_posicion, portMAX_DELAY);
+//		lazo_posicion();
 	}
-  /* USER CODE END control_posicion */
+  /* USER CODE END test */
 }
 
 /**
@@ -1284,17 +1214,22 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	}
 
 	else if (htim->Instance == TIM1) {
-		BaseType_t tarea_mayor_prioridad = pdFALSE;
-		xSemaphoreGiveFromISR(semaforo_posicion, &tarea_mayor_prioridad);
-		portYIELD_FROM_ISR(tarea_mayor_prioridad);
+//		BaseType_t tarea_mayor_prioridad = pdFALSE;
+//		xSemaphoreGiveFromISR(semaforo_posicion, &tarea_mayor_prioridad);
+//		portYIELD_FROM_ISR(tarea_mayor_prioridad);
+		lazo_posicion();
 	}
 
 	else if (htim->Instance == TIM2) {
-		if (__HAL_TIM_IS_TIM_COUNTING_DOWN(htim)) {
-			overflow_encoder--;
-		}
-		else {
-			overflow_encoder++;
+		if (estado_sistema == IDLE || estado_sistema == CLOSED_LOOP) {
+			mensaje_t mensaje = {
+				.estado = FAULT,
+				.origen = ENC_OVERFLOW
+			};
+
+			BaseType_t tarea_mayor_prioridad = pdFALSE;
+			xQueueSendFromISR(cola_estados, &mensaje, &tarea_mayor_prioridad);
+			portYIELD_FROM_ISR(tarea_mayor_prioridad);
 		}
 	}
 
