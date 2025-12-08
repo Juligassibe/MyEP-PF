@@ -168,7 +168,7 @@ void lazo_corriente() {
 	 */
 
 	controlador.fx_consigna_vd = (((int64_t)controlador.fx_Pd * (-fx_corrientes_qd0[1])) >> N) +
-								 (((int64_t)FX_Rs * fx_corrientes_qd0[1]) >> N) +
+								 (((int64_t)FX_Rs * fx_corrientes_qd0[1]) >> N) -
 								 PP * (((((int64_t)controlador.fx_wm * FX_Lq) >> N) * fx_corrientes_qd0[0]) >> N);
 
 	// CHECKEAR QUE LAS CUENTAS SEAN VALIDAS
