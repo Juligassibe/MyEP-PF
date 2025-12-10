@@ -22,6 +22,9 @@ int32_t FX_V_CC;
 int32_t FX_I_MAX;
 int32_t FX_I_MIN;
 int32_t FX_ALPHA;
+volatile int32_t fx_debug_pos;
+int32_t fx_t_acc;
+int32_t fx_distancia_acc;
 
 
 volatile int32_t overflow_encoder = 0;
@@ -86,7 +89,9 @@ void init_controlador(controlador_t *controlador) {
 	FX_V_CC = fp2fx(12.0);
 	FX_I_MAX = fp2fx(1.5);
 	FX_I_MIN = fp2fx(-1.5);
-	FX_ALPHA = fp2fx(0.03);	// alpha = 1 - lambda en el filtro IIR (no confundir con lambda de flujo concatenado)
+	FX_ALPHA = fp2fx(0.03);								// alpha = 1 - lambda en el filtro IIR (no confundir con lambda de flujo concatenado)
+	fx_t_acc = fp2fx(V_MAX / A_MAX);					// t_acc = v_max / a_max = 0.24 (15728 en Q15.16)
+	fx_distancia_acc = fp2fx(2*0.5*V_MAX*V_MAX/A_MAX);	// d_acc = 2 * 0.5 * a_max * t_acc^2 = 18 inicialmente (1179648 en Q15.16)
 
 	controlador->fx_pid_max = ((int64_t)FX_I_MAX * FX_KT) >> N;
 	controlador->fx_Pq = POLO_CORRIENTE * FX_Lq;
@@ -101,8 +106,8 @@ void init_interpolador(interpolador_t *interpolador) {
 	interpolador->fx_posicion_final = 0;
 	interpolador->fx_distancia_total = 0;
 	interpolador->fx_consigna_posicion = 0;
-	interpolador->fx_a_max = fp2fx(30000.0);
-	interpolador->fx_v_max = fp2fx(7200.0);
+	interpolador->fx_a_max = fp2fx(A_MAX);
+	interpolador->fx_v_max = fp2fx(V_MAX);
 	interpolador->fx_t_acc = 0;
 	interpolador->fx_t_const = 0;
 	interpolador->fx_t_total = 0;
@@ -164,12 +169,10 @@ void lazo_corriente() {
 
 	/*
 	 * vd*[n] = Pd * (-id[n]) + caida ohmica + desacople iq
-	 * ed[n] = -id[n] ya que mi consigna de id es 0
+	 * ed[n] = -id[n] ya que la consigna de id es 0
 	 */
 
-	controlador.fx_consigna_vd = (((int64_t)controlador.fx_Pd * (-fx_corrientes_qd0[1])) >> N) +
-								 (((int64_t)FX_Rs * fx_corrientes_qd0[1]) >> N) -
-								 PP * (((((int64_t)controlador.fx_wm * FX_Lq) >> N) * fx_corrientes_qd0[0]) >> N);
+	controlador.fx_consigna_vd = -PP * (((((int64_t)controlador.fx_wm * FX_Lq) >> N) * fx_corrientes_qd0[0]) >> N);
 
 	// CHECKEAR QUE LAS CUENTAS SEAN VALIDAS
 	// T.inv. Park
@@ -178,21 +181,21 @@ void lazo_corriente() {
 							  (((int64_t)controlador.fx_consigna_vd * COS[(LUT_index_cos > 359) ? (719 - LUT_index_cos) : (LUT_index_cos)]) >> N);
 
 	// Adelantar 240 es igual que atrasar 120
-	LUT_index_cos -= 240;
-	LUT_index_sin -= 240;
+	LUT_index_cos += 480;
+	LUT_index_sin += 480;
 
-	if (LUT_index_cos < 0) {
-		LUT_index_cos += 720;
+	if (LUT_index_cos > 719) {
+		LUT_index_cos -= 720;
 	}
 
-	if (LUT_index_sin < 0) {
-		LUT_index_sin += 720;
+	if (LUT_index_sin > 719) {
+		LUT_index_sin -= 720;
 	}
 	// vb = vq * -sin(tita-2pi/3) + vd * cos(tita-2pi/3)
 	int32_t fx_consigna_vb = ((-(int64_t)controlador.fx_consigna_vq * COS[(LUT_index_sin > 359) ? (719 - LUT_index_sin) : (LUT_index_sin)]) >> N) +
 			 	 	 	 	  (((int64_t)controlador.fx_consigna_vd * COS[(LUT_index_cos > 359) ? (719 - LUT_index_cos) : (LUT_index_cos)]) >> N);
 
-	// Adelanto 240, 240-120=120, adelanta 120
+	// Adelantar 240 es igual que atrasar 120
 	LUT_index_cos += 480;
 	LUT_index_sin += 480;
 
@@ -405,11 +408,6 @@ void interpolar() {
 		int32_t desplazamiento = interpolador.fx_posicion_final - interpolador.fx_posicion_inicial;
 		interpolador.fx_distancia_total = desplazamiento > 0 ? desplazamiento : (-desplazamiento);
 
-		// t_acc = v_max / a_max = 0.24 (15728 en Q15.16)
-		const int32_t fx_t_acc = 15728;
-		// d_acc = 2 * 0.5 * a_max * t_acc^2 = 622 inicialmente (40763392 en Q15.16)
-		const int32_t fx_distancia_acc = 40763392;
-
 		// Perfil triangular de velocidad
 		if (fx_distancia_acc >= interpolador.fx_distancia_total) {
 			// t_acc = sqrt((d_acc * 2) / a_max))
@@ -421,8 +419,8 @@ void interpolar() {
 		// Perfil trapezoidal de velocidad
 		else {
 			interpolador.fx_t_acc = fx_t_acc;
-			// t_const = d_const / v_max = (d_total - 2*d_acc) / v_max
-			interpolador.fx_t_const = (((int64_t)(interpolador.fx_distancia_total - (fx_distancia_acc << 1))) << N) / interpolador.fx_v_max;
+			// t_const = d_const / v_max = (d_total - d_acc) / v_max
+			interpolador.fx_t_const = (((int64_t)(interpolador.fx_distancia_total - fx_distancia_acc)) << N) / interpolador.fx_v_max;
 		}
 
 		interpolador.fx_t0 = 0;
@@ -436,27 +434,48 @@ void interpolar() {
 	// Comienzo a calcular perfil
 	interpolador.fx_t_act += interpolador.fx_dt;
 
+	// Aceleracion
 	if (interpolador.fx_t_act <= interpolador.fx_t_acc) {
 		interpolador.fx_consigna_posicion = interpolador.fx_posicion_inicial +
 											(((((int64_t)(interpolador.fx_a_max >> 1) * interpolador.fx_t_act) >> N) * interpolador.fx_t_act) >> N);
 	}
 
+	// Velocidad constante
 	else if (interpolador.fx_t_act <= interpolador.fx_t_acc + interpolador.fx_t_const) {
 		interpolador.fx_consigna_posicion = interpolador.fx_posicion_inicial +
 											(((((int64_t)(interpolador.fx_a_max >> 1) * interpolador.fx_t_acc) >> N) * interpolador.fx_t_acc) >> N) +
 											(((int64_t)interpolador.fx_v_max * (interpolador.fx_t_act - interpolador.fx_t_acc)) >> N);
 	}
 
-	else if (interpolador.fx_t_act <= (interpolador.fx_t_acc << 1) + interpolador.fx_t_const){
+	// Desaceleracion
+	else if (interpolador.fx_t_act <= interpolador.fx_t_total){
 		interpolador.fx_consigna_posicion = interpolador.fx_posicion_final -
-											(((((int64_t)(interpolador.fx_a_max >> 1) * (interpolador.fx_t_total - interpolador.fx_t_act)) >> N) *
-																					    (interpolador.fx_t_total - interpolador.fx_t_act)) >> N);
+											(((((int64_t)(interpolador.fx_a_max >> 1) * (interpolador.fx_t_total - interpolador.fx_t_act + interpolador.fx_dt)) >> N) *
+																					    (interpolador.fx_t_total - interpolador.fx_t_act + interpolador.fx_dt)) >> N);
 	}
 }
 
-void set_posicion_final_nueva(int32_t fx_posicion_final) {
+void set_posicion_final_nueva() {
+	HAL_UART_Transmit(&huart1, (uint8_t *)"Ej: 123.45\nENTER para cancelar\n", 31, 1000);
+	xSemaphoreTake(semaforo_consola, osWaitForever);
+
+	if (buffer_rx[0] == '\0') {
+		HAL_UART_Transmit(&huart1, (uint8_t *)"Cancelado\n", 10, 1000);
+		return;
+	}
+
+	char *endptr = NULL;
+	float fp_nueva_consigna = strtod((char *)buffer_rx, &endptr);
+
+	if (*endptr == buffer_rx[0]) {
+		HAL_UART_Transmit(&huart1, (uint8_t *)"Consigna no valida\n", 19, 1000);
+		return;
+	}
+
+	int32_t fx_nueva_consigna = fp2fx(fp_nueva_consigna);
+
 	taskENTER_CRITICAL();
-	interpolador.fx_posicion_final = fx_posicion_final;
+	interpolador.fx_posicion_final = fx_nueva_consigna;
 	interpolador.fx_posicion_inicial = get_fx_position();
 	interpolador.nueva = 1;
 	taskEXIT_CRITICAL();
@@ -482,7 +501,9 @@ int32_t get_fx_position() {
 //					(overflow_encoder < 0 ? (overflow_encoder + 1) : (overflow_encoder)) * 65536;
 	int32_t steps = __HAL_TIM_GET_COUNTER(&htim2) - 32768;
 
-	return fp2fx(steps * 0.15);
+	fx_debug_pos = fp2fx(steps * 0.15);
+
+	return fx_debug_pos;
 }
 
 HAL_StatusTypeDef alinear_rotor() {

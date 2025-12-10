@@ -125,6 +125,9 @@ void get_adc_offsets();
 
 /* USER CODE BEGIN Private defines */
 
+#define RX_SIZE 16
+extern uint8_t buffer_rx[RX_SIZE];
+
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

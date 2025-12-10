@@ -22,9 +22,11 @@
 #define PP				4			// Pares de polos
 #define LAMBDA			0.0014	    // Flujo concatenado
 #define POLO_CORRIENTE  5000		// Polo lazos de corriente s = -5000
-#define PID_P			0.1745		// Nm / grado
+#define PID_P			0.1		// Nm / grado
 #define PID_I			173.5329	// Nm / grado . s
-#define PID_D			0.0007 		// Nm / grado / s
+#define PID_D			0.0 		// Nm / grado / s
+#define A_MAX			360.0
+#define V_MAX			90.0
 
 typedef struct {
 	// Lazo posicion
@@ -77,7 +79,7 @@ void lazo_corriente();
 void lazo_posicion();
 int32_t get_corrientes_qd0(int32_t *corrientes_qd0);
 void interpolar();
-void set_posicion_final_nueva(int32_t fx_posicion_final);
+void set_posicion_final_nueva();
 uint32_t mi_sqrt(uint64_t numero);
 int32_t get_fx_position();
 HAL_StatusTypeDef alinear_rotor();

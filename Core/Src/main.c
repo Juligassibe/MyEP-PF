@@ -42,8 +42,6 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define RX_SIZE 16
-
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -709,7 +707,7 @@ void init_sistema() {
 	// INIT ENCODER
 	error = init_encoder(&hspi1, CS_MT6835_GPIO_Port, CS_MT6835_Pin, &hencoder, 600,
 						 MT6835_ABZ_NO_SWAP, MT6835_ZRE, MT6835_Z_WIDTH_1LSB, MT6835_Z_ARE,
-						 MT6835_CCW_AB);
+						 MT6835_CCW_BA);
 
 	if (error != HAL_OK) {
 		mensaje.estado = FAULT;
@@ -1095,25 +1093,9 @@ void consola(void *argument)
 				break;
 
 			case '4':
-				len = snprintf(cadena, sizeof(cadena), "Ej: 123.45\nENTER para cancelar\n>> ");
+				set_posicion_final_nueva();
+				len = snprintf(cadena, sizeof(cadena), "%ld\n", interpolador.fx_posicion_final);
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-				xSemaphoreTake(semaforo_consola, osWaitForever);
-
-				if (buffer_rx[0] == '\0') {
-					HAL_UART_Transmit(&huart1, (uint8_t *)"Cancelado\n", 10, 1000);
-				}
-
-				else if (isdigit(buffer_rx[0])) {
-					int32_t fx_nueva_consigna = fp2fx(strtod((char *)buffer_rx, NULL));
-					len = snprintf(cadena, sizeof(cadena), "%ld\n", fx_nueva_consigna);
-					HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-					set_posicion_final_nueva(fx_nueva_consigna);
-				}
-
-				else {
-					HAL_UART_Transmit(&huart1, (uint8_t *)"Consigna no valida\n", 19, 1000);
-				}
-
 				break;
 
 			case '5':
@@ -1162,27 +1144,9 @@ void test(void *argument)
 {
   /* USER CODE BEGIN test */
 	osDelay(osWaitForever);
-	int32_t corrientes[2];
-	char cadena[64];
-	int len;
-//
-//	uint32_t fin;
-	HAL_TIM_Base_Start(&htim3);
-//	HAL_TIM_Base_Start(&htim3);
-	get_adc_offsets();
   /* Infinite loop */
 	while (1) {
-//		tim1OF = 0;
-//		__HAL_TIM_SET_COUNTER(&htim1, 0);
-		get_corrientes_qd0(corrientes);
-//		fin = __HAL_TIM_GET_COUNTER(&htim1);
-//
-		len = snprintf(cadena, sizeof(cadena), "%ld, %ld\n", corrientes[0], corrientes[1]);
-		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-//
-		osDelay(pdMS_TO_TICKS(10));
-//		xSemaphoreTake(semaforo_posicion, portMAX_DELAY);
-//		lazo_posicion();
+
 	}
   /* USER CODE END test */
 }
@@ -1210,14 +1174,16 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 //		xSemaphoreGiveFromISR(semaforo_corriente, &tarea_mayor_prioridad);
 //		portYIELD_FROM_ISR(tarea_mayor_prioridad);
 		lazo_corriente();
+//		tim3OF++;
 //		HAL_GPIO_WritePin(TEST_GPIO_Port, TEST_Pin, GPIO_PIN_SET);
 	}
 
 	else if (htim->Instance == TIM1) {
+		lazo_posicion();
 //		BaseType_t tarea_mayor_prioridad = pdFALSE;
 //		xSemaphoreGiveFromISR(semaforo_posicion, &tarea_mayor_prioridad);
 //		portYIELD_FROM_ISR(tarea_mayor_prioridad);
-		lazo_posicion();
+		tim1OF++;
 	}
 
 	else if (htim->Instance == TIM2) {
