@@ -22,9 +22,9 @@
 #define PP				4			// Pares de polos
 #define LAMBDA			0.0014	    // Flujo concatenado
 #define POLO_CORRIENTE  5000		// Polo lazos de corriente s = -5000
-#define PID_P			0.1		// Nm / grado
-#define PID_I			173.5329	// Nm / grado . s
-#define PID_D			0.0 		// Nm / grado / s
+#define PID_P			0.001		// Nm / grado
+#define PID_I			0.1		// Nm / grado . s
+#define PID_D			0.0001 		// Nm / grado / s
 #define A_MAX			360.0
 #define V_MAX			90.0
 
@@ -87,6 +87,7 @@ void init_lazos_control();
 void deinit_lazos_control();
 void get_Ld();
 void get_Lq();
+void modificar_constantes();
 
 extern volatile int32_t overflow_encoder;
 extern uint32_t lecturas_adcs;

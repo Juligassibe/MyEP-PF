@@ -856,11 +856,11 @@ void fault_handler(mensaje_t *mensaje) {
 			HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
 			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
 
-			HAL_TIM_Base_Stop(&htim3);
-			__HAL_TIM_DISABLE_IT(&htim3, TIM_IT_UPDATE);
+			HAL_TIM_Base_Stop_IT(&htim3);
+//			__HAL_TIM_DISABLE_IT(&htim3, TIM_IT_UPDATE);
 
-			HAL_TIM_Base_Stop(&htim1);
-			__HAL_TIM_DISABLE_IT(&htim1, TIM_IT_UPDATE);
+			HAL_TIM_Base_Stop_IT(&htim1);
+//			__HAL_TIM_DISABLE_IT(&htim1, TIM_IT_UPDATE);
 
 			len = snprintf(cadena, sizeof(cadena), "E: SOBRECORRIENTE\n");
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
@@ -889,16 +889,6 @@ void fault_handler(mensaje_t *mensaje) {
 
 		case ADC_MM:
 			len = snprintf(cadena, sizeof(cadena), "E: ADC MultiMode (%d)\n", mensaje->error);
-			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
-			break;
-
-		case ADC1_INJ:
-			len = snprintf(cadena, sizeof(cadena), "E: ADC1 injected (%d)\n", mensaje->error);
-			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
-			break;
-
-		case ADC2_INJ:
-			len = snprintf(cadena, sizeof(cadena), "E: ADC2 injected (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
@@ -937,6 +927,8 @@ void fault_handler(mensaje_t *mensaje) {
 			break;
 
 		case ENC_OVERFLOW:
+			HAL_TIM_Base_Stop_IT(&htim3);
+			HAL_TIM_Base_Stop_IT(&htim1);
 			HAL_UART_Transmit(&huart1, (uint8_t *)"E: Overflow encoder\n", 20, 1000);
 			break;
 
@@ -945,8 +937,8 @@ void fault_handler(mensaje_t *mensaje) {
 			break;
 	}
 
-	mensaje->estado = NOT_INIT;
-	xQueueSend(cola_estados, &mensaje, 1000);
+//	mensaje->estado = NOT_INIT;
+//	xQueueSend(cola_estados, &mensaje, 1000);
 }
 
 void get_adc_offsets() {
@@ -1011,10 +1003,6 @@ void sm(void *argument)
 				init_sistema();
 				break;
 
-			case NOT_INIT:
-				HAL_UART_Transmit(&huart1, (uint8_t *)"Error al iniciar, reiniciar\n", 28, 1000);
-				break;
-
 			case IDLE:
 				if (mensaje.origen == 0) {
 					HAL_UART_Transmit(&huart1, (uint8_t *)"Inicio listo\n", 13, 1000);
@@ -1031,12 +1019,14 @@ void sm(void *argument)
 
 			case FAULT:
 				fault_handler(&mensaje);
+				HAL_UART_Transmit(&huart1, (uint8_t *)"Reiniciar\n", 10, 1000);
 				break;
 
 			default:
 				HAL_UART_Transmit(&huart1, (uint8_t *)"Estado desconocido\n", 19, 1000);
 				break;
 		}
+
 		estado_sistema = mensaje.estado;
 
 		xQueueReceive(cola_estados, &mensaje, portMAX_DELAY);
@@ -1065,6 +1055,7 @@ void consola(void *argument)
 					"4. Nueva consigna\n"
 					"5. Obtener posicion\n"
 					"6. Offsets ADCs\n"
+					"7. Cambiar constantes de control\n"
 					">> ";
 
 	uint16_t len_menu = strlen(menu);
@@ -1094,23 +1085,30 @@ void consola(void *argument)
 
 			case '4':
 				set_posicion_final_nueva();
-				len = snprintf(cadena, sizeof(cadena), "%ld\n", interpolador.fx_posicion_final);
+				len = snprintf(cadena, sizeof(cadena), "\n%ld\n", interpolador.fx_posicion_final);
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 
 			case '5':
-				len = snprintf(cadena, sizeof(cadena), "Posicion: %ld (Q15.16)\n", get_fx_position());
+				len = snprintf(cadena, sizeof(cadena), "\nPosicion: %ld (Q15.16)\n", get_fx_position());
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 
 			case '6':
 				get_adc_offsets();
-				len = snprintf(cadena, sizeof(cadena), "Offsets: %d, %d\n", adc_offsets[0], adc_offsets[1]);
+				len = snprintf(cadena, sizeof(cadena), "\nOffsets: %d, %d\n", adc_offsets[0], adc_offsets[1]);
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 
 			case '7':
-				get_Ld();
+				modificar_constantes();
+				len = snprintf(cadena, sizeof(cadena), "\n%ld\n%ld\n%ld\n%ld\n%ld\n", controlador.fx_P,
+																					controlador.fx_I,
+																					controlador.fx_D,
+																					controlador.fx_Pq,
+																					controlador.fx_Pd);
+
+				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 
 			case '8':
@@ -1124,7 +1122,7 @@ void consola(void *argument)
 				break;
 
 			default:
-				len = snprintf(cadena, sizeof(cadena), "RX: %s\n", (char *)buffer_rx);
+				len = snprintf(cadena, sizeof(cadena), "\nRX: %s\n", (char *)buffer_rx);
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 		}
@@ -1170,19 +1168,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   }
   /* USER CODE BEGIN Callback 1 */
 	else if (htim->Instance == TIM3) {
-//		BaseType_t tarea_mayor_prioridad = pdFALSE;
-//		xSemaphoreGiveFromISR(semaforo_corriente, &tarea_mayor_prioridad);
-//		portYIELD_FROM_ISR(tarea_mayor_prioridad);
-		lazo_corriente();
-//		tim3OF++;
-//		HAL_GPIO_WritePin(TEST_GPIO_Port, TEST_Pin, GPIO_PIN_SET);
+		if (__HAL_TIM_IS_TIM_COUNTING_DOWN(&htim3)) {
+			lazo_corriente();
+		}
 	}
 
 	else if (htim->Instance == TIM1) {
 		lazo_posicion();
-//		BaseType_t tarea_mayor_prioridad = pdFALSE;
-//		xSemaphoreGiveFromISR(semaforo_posicion, &tarea_mayor_prioridad);
-//		portYIELD_FROM_ISR(tarea_mayor_prioridad);
 		tim1OF++;
 	}
 

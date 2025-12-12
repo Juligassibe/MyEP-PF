@@ -43,7 +43,6 @@ extern "C" {
 
 typedef enum estados_e {
 	INIT,
-	NOT_INIT,
 	IDLE,
 	CLOSED_LOOP,
 	FAULT
@@ -56,8 +55,6 @@ typedef enum origen_e {
 	ADC2_CAL,
 	ADC_MM,
 	ADC_2,
-	ADC1_INJ,
-	ADC2_INJ,
 	TIMER1,
 	TIMER2,
 	TIMER3,

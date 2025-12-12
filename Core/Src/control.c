@@ -87,8 +87,8 @@ void init_controlador(controlador_t *controlador) {
 	FX_Rs = fp2fx(0.8);
 	FX_1_dt = fp2fx(1000.0);
 	FX_V_CC = fp2fx(12.0);
-	FX_I_MAX = fp2fx(1.5);
-	FX_I_MIN = fp2fx(-1.5);
+	FX_I_MAX = fp2fx(2.0);
+	FX_I_MIN = fp2fx(-2.0);
 	FX_ALPHA = fp2fx(0.03);								// alpha = 1 - lambda en el filtro IIR (no confundir con lambda de flujo concatenado)
 	fx_t_acc = fp2fx(V_MAX / A_MAX);					// t_acc = v_max / a_max = 0.24 (15728 en Q15.16)
 	fx_distancia_acc = fp2fx(2*0.5*V_MAX*V_MAX/A_MAX);	// d_acc = 2 * 0.5 * a_max * t_acc^2 = 18 inicialmente (1179648 en Q15.16)
@@ -221,12 +221,6 @@ void lazo_corriente() {
 }
 
 void lazo_posicion() {
-	/*
-	 * steps = CNT + 2400 * cantidad de overflows (en posicion positiva)
-	 * steps = 2400 - CNT + 2400 * cantidad de overflows (en posicion negativa)
-	 *
-	 * Si estoy en vueltas negativas, tomo CNT como negativo
-	 */
 	int32_t fx_position = get_fx_position();
 
 	// Velocidad del rotor
@@ -242,9 +236,9 @@ void lazo_posicion() {
 	// P[n] = Kp * e[n]
 	controlador.fx_proporcional = ((int64_t)controlador.fx_P * fx_error_pos) >> N;
 
-	// I[n] = Ki * dt * (e[n] - e[n-1]) / 2 + I[n-1]
+	// I[n] = Ki * dt * (e[n] + e[n-1]) / 2 + I[n-1]
 	int64_t tempI = ((int64_t)controlador.fx_I * controlador.fx_dt) >> N;
-	tempI = (tempI * (fx_error_pos - controlador.fx_prev_position_error)) >> N;
+	tempI = (tempI * (fx_error_pos + controlador.fx_prev_position_error)) >> N;
 	controlador.fx_integral += (int32_t)(tempI >> 1);
 
 	// D[n] = Kd * (-wm) (No hago parte derivativa con el error por ser PI + D)
@@ -296,6 +290,9 @@ int32_t get_corrientes_qd0(int32_t *corrientes) {
 
 	uint16_t lectura_faseA = (uint16_t)(lecturas_adcs & 0xFFFC) + adc_offsets[0];
 	uint16_t lectura_faseB = (uint16_t)((lecturas_adcs >> 16) & 0xFFFC) + adc_offsets[1];
+
+//	lectura_faseA = 2048;
+//	lectura_faseB = 2048;
 
 //	lectura_faseA &= 0xFFFC;
 //	lectura_faseB &= 0xFFFC;
@@ -410,6 +407,7 @@ void interpolar() {
 
 		// Perfil triangular de velocidad
 		if (fx_distancia_acc >= interpolador.fx_distancia_total) {
+			// Uso d_total por que despejo de d_acc = 0.5*a_max*t_acc^2 y 2*d_acc = d_total
 			// t_acc = sqrt((d_acc * 2) / a_max))
 			interpolador.fx_t_acc = mi_sqrt(((int64_t)interpolador.fx_distancia_total << N) / interpolador.fx_a_max) << 8;
 			interpolador.fx_t_const = 0;
@@ -419,6 +417,7 @@ void interpolar() {
 		// Perfil trapezoidal de velocidad
 		else {
 			interpolador.fx_t_acc = fx_t_acc;
+			interpolador.fx_v_max = fp2fx(V_MAX);
 			// t_const = d_const / v_max = (d_total - d_acc) / v_max
 			interpolador.fx_t_const = (((int64_t)(interpolador.fx_distancia_total - fx_distancia_acc)) << N) / interpolador.fx_v_max;
 		}
@@ -728,6 +727,51 @@ void get_Lq() {
 																			(int32_t)((int64_t)fx_tau * FX_Rs) >> N);
 	HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 
+}
+
+void modificar_constantes() {
+	if (estado_sistema != IDLE) {
+		HAL_UART_Transmit(&huart1, (uint8_t *)"Llevar el sistema a IDLE\n", 25, 1000);
+		return;
+	}
+	HAL_UART_Transmit(&huart1, (uint8_t *)"\n>> ", 3, 1000);
+
+	xSemaphoreTake(semaforo_consola, osWaitForever);
+
+	char *endptr = NULL;
+	float nueva = strtod((char *)&buffer_rx[1], &endptr);
+
+	if (*endptr == buffer_rx[0]) {
+		HAL_UART_Transmit(&huart1, (uint8_t *)"Constante no valida\n", 20, 1000);
+		return;
+	}
+
+	switch (buffer_rx[0]) {
+		case 'p':
+		case 'P':
+			controlador.fx_P = fp2fx(nueva);
+			break;
+
+		case 'i':
+		case 'I':
+			controlador.fx_I = fp2fx(nueva);
+			break;
+
+		case 'd':
+		case 'D':
+			controlador.fx_D = fp2fx(nueva);
+			break;
+
+		case 'q':
+		case 'Q':
+			controlador.fx_Pq = fp2fx(nueva);
+			break;
+
+		case 'e':
+		case 'E':
+			controlador.fx_Pd = fp2fx(nueva);
+			break;
+	}
 }
 
 
