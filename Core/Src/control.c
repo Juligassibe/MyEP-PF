@@ -76,7 +76,7 @@ void init_controlador(controlador_t *controlador) {
 
 	// Inicio constantes globales
 	FX_LAMBDA = fp2fx((double)LAMBDA);
-	FX_ADC_CONST = fp2fx((5.0/(2805-2048)));
+	FX_ADC_CONST = fp2fx(ADC_CONST);
 	FX_360 = fp2fx(360.0);
 	FX_2_3 = fp2fx(2.0/3);
 	FX_1_2 = fp2fx(0.5);
@@ -291,15 +291,12 @@ int32_t get_corrientes_qd0(int32_t *corrientes) {
 	uint16_t lectura_faseA = (uint16_t)(lecturas_adcs & 0xFFFC) + adc_offsets[0];
 	uint16_t lectura_faseB = (uint16_t)((lecturas_adcs >> 16) & 0xFFFC) + adc_offsets[1];
 
-//	lectura_faseA = 2048;
-//	lectura_faseB = 2048;
-
 //	lectura_faseA &= 0xFFFC;
 //	lectura_faseB &= 0xFFFC;
 
 	// La lectura nueva del ADC seria xn en el filtro IIR
-	int32_t fx_xnA = FX_ADC_CONST * (lectura_faseA - 2048);
-	int32_t fx_xnB = FX_ADC_CONST * (lectura_faseB - 2048);
+	int32_t fx_xnA = FX_ADC_CONST * (lectura_faseA - ADC_0A);
+	int32_t fx_xnB = FX_ADC_CONST * (lectura_faseB - ADC_0A);
 
 	// Filtro IIR
 	controlador.fx_corrienteA = controlador.fx_corrienteA + (((int64_t)FX_ALPHA * (fx_xnA - controlador.fx_corrienteA)) >> N);
@@ -333,7 +330,7 @@ int32_t get_corrientes_qd0(int32_t *corrientes) {
 	int32_t fx_LUT_index = ((fx_rotor_position << 2) % FX_360) * 2;
 //	float fp_LUT_index = ((float)fx_LUT_index / (1 << N));
 
-	// Redondeo al entero mas cercanox
+	// Redondeo al entero mas cercano, sumo 0.5 en Q15.16
 	if (fx_LUT_index > 0){
 		fx_LUT_index += 32768;
 	}
@@ -507,8 +504,7 @@ int32_t get_fx_position() {
 
 HAL_StatusTypeDef alinear_rotor() {
 	// Alimento solo fase A para alinear eje d con fase A
-	// Hago duty = 10% (1A aprox)
-	htim3.Instance->CCR1 = 300;
+	htim3.Instance->CCR1 = 500;
 
 	// Doy tiempo al rotor para alinearse
 	osDelay(pdMS_TO_TICKS(1000));

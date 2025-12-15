@@ -23,10 +23,13 @@
 #define LAMBDA			0.0014	    // Flujo concatenado
 #define POLO_CORRIENTE  5000		// Polo lazos de corriente s = -5000
 #define PID_P			0.001		// Nm / grado
-#define PID_I			0.1		// Nm / grado . s
+#define PID_I			0.1			// Nm / grado . s
 #define PID_D			0.0001 		// Nm / grado / s
 #define A_MAX			360.0
 #define V_MAX			90.0
+#define ADC_0A			3102
+#define ADC_3A			3791
+#define ADC_CONST		3.0 /(ADC_3A - ADC_0A)	// Pendiente para convertir lectura ADC a corriente
 
 typedef struct {
 	// Lazo posicion

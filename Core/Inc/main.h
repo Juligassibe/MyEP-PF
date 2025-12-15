@@ -35,6 +35,12 @@ extern "C" {
 #include "cmsis_os.h"
 #include "task.h"
 #include "semphr.h"
+#include "adc.h"
+#include "dma.h"
+#include "spi.h"
+#include "tim.h"
+#include "usart.h"
+#include "gpio.h"
 
 /* USER CODE END Includes */
 
@@ -77,15 +83,8 @@ typedef struct mensaje_t {
 /* Exported constants --------------------------------------------------------*/
 /* USER CODE BEGIN EC */
 
-extern UART_HandleTypeDef huart1;
-extern TIM_HandleTypeDef htim1;
-extern TIM_HandleTypeDef htim2;
-extern TIM_HandleTypeDef htim3;
-extern SPI_HandleTypeDef hspi1;
-extern osMessageQId cola_estadosHandle;
 extern xQueueHandle cola_estados;
 extern xSemaphoreHandle semaforo_consola;
-extern xSemaphoreHandle semaforo_adc;
 extern int16_t adc_offsets[2];
 extern volatile uint16_t tim1OF;
 extern volatile uint16_t tim3OF;
@@ -97,8 +96,6 @@ extern estados_e estado_sistema;
 /* USER CODE BEGIN EM */
 
 /* USER CODE END EM */
-
-void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
@@ -117,13 +114,15 @@ void get_adc_offsets();
 #define TEST_GPIO_Port GPIOC
 #define CS_MT6835_Pin GPIO_PIN_4
 #define CS_MT6835_GPIO_Port GPIOA
-#define STEP_Pin GPIO_PIN_11
-#define STEP_GPIO_Port GPIOB
+#define STOP_Pin GPIO_PIN_12
+#define STOP_GPIO_Port GPIOB
+#define STOP_EXTI_IRQn EXTI15_10_IRQn
+#define LED_ROJO_Pin GPIO_PIN_13
+#define LED_ROJO_GPIO_Port GPIOB
+#define LED_VERDE_Pin GPIO_PIN_14
+#define LED_VERDE_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
-
-#define RX_SIZE 16
-extern uint8_t buffer_rx[RX_SIZE];
 
 /* USER CODE END Private defines */
 
