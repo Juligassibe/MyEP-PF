@@ -69,7 +69,8 @@ typedef enum origen_e {
 	PWM3,
 	UART_RX,
 	CLI,
-	ENC_OVERFLOW
+	ENC_OVERFLOW,
+	PARADA
 } origen_e;
 
 typedef struct mensaje_t {

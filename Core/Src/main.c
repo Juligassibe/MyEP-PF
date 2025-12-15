@@ -345,10 +345,8 @@ void fault_handler(mensaje_t *mensaje) {
 			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
 
 			HAL_TIM_Base_Stop_IT(&htim3);
-//			__HAL_TIM_DISABLE_IT(&htim3, TIM_IT_UPDATE);
 
 			HAL_TIM_Base_Stop_IT(&htim1);
-//			__HAL_TIM_DISABLE_IT(&htim1, TIM_IT_UPDATE);
 
 			len = snprintf(cadena, sizeof(cadena), "E: SOBRECORRIENTE\n");
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);

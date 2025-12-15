@@ -186,6 +186,11 @@ void sm(void *argument)
 					HAL_UART_Transmit(&huart1, (uint8_t *)"Inicio listo\n", 13, 1000);
 					xSemaphoreGive(semaforo_consola);
 				}
+
+				else if (mensaje.origen == PARADA) {
+					HAL_UART_Transmit(&huart1, (uint8_t *)"Parada de emergencia\n", 21, 1000);
+				}
+
 				else {
 					HAL_UART_Transmit(&huart1, (uint8_t *)"Lazos de control detenidos\n", 27, 1000);
 				}

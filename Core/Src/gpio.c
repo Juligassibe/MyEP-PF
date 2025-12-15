@@ -96,7 +96,19 @@ void MX_GPIO_Init(void)
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (GPIO_Pin == STOP_Pin) {
-		HAL_GPIO_TogglePin(TEST_GPIO_Port, TEST_Pin);
+		if (estado_sistema == CLOSED_LOOP) {
+			HAL_TIM_Base_Stop_IT(&htim3);
+			HAL_TIM_Base_Stop_IT(&htim1);
+
+			mensaje_t mensaje = {
+				.estado = IDLE,
+				.origen = PARADA
+			};
+
+			BaseType_t tarea_mayor_prioridad = pdFALSE;
+			xQueueSendFromISR(cola_estados, &mensaje, &tarea_mayor_prioridad);
+			portYIELD_FROM_ISR(tarea_mayor_prioridad);
+		}
 	}
 }
 

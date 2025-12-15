@@ -87,8 +87,8 @@ void init_controlador(controlador_t *controlador) {
 	FX_Rs = fp2fx(0.8);
 	FX_1_dt = fp2fx(1000.0);
 	FX_V_CC = fp2fx(12.0);
-	FX_I_MAX = fp2fx(2.0);
-	FX_I_MIN = fp2fx(-2.0);
+	FX_I_MAX = fp2fx(3.0);
+	FX_I_MIN = fp2fx(-3.0);
 	FX_ALPHA = fp2fx(0.03);								// alpha = 1 - lambda en el filtro IIR (no confundir con lambda de flujo concatenado)
 	fx_t_acc = fp2fx(V_MAX / A_MAX);					// t_acc = v_max / a_max = 0.24 (15728 en Q15.16)
 	fx_distancia_acc = fp2fx(2*0.5*V_MAX*V_MAX/A_MAX);	// d_acc = 2 * 0.5 * a_max * t_acc^2 = 18 inicialmente (1179648 en Q15.16)
@@ -423,7 +423,7 @@ void interpolar() {
 		interpolador.fx_t_act = 0;
 		interpolador.fx_t_total = interpolador.fx_t_acc * 2 + interpolador.fx_t_const;
 		interpolador.fx_v_max *= (desplazamiento < 0 ? (-1) : 1);
-		interpolador.fx_a_max *= (desplazamiento < 0 ? (-1) : 1);
+		interpolador.fx_a_max = (desplazamiento < 0 ? (fp2fx(-A_MAX)) : fp2fx(A_MAX));
 		interpolador.nueva = 0;
 	}
 
@@ -540,6 +540,9 @@ void init_lazos_control() {
 		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 		return;
 	}
+
+	// Para reinterpolar en caso de venir de haber detenido los lazos de control
+	interpolador.nueva = 1;
 
 	mensaje_t mensaje = {
 		.estado = CLOSED_LOOP
