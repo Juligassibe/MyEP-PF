@@ -193,7 +193,7 @@ void init_sistema() {
 	HAL_StatusTypeDef error;
 
 	// INIT ENCODER
-	error = init_encoder(&hspi1, CS_MT6835_GPIO_Port, CS_MT6835_Pin, &hencoder, 600,
+	error = init_encoder(&hspi1, CS_MT6835_GPIO_Port, CS_MT6835_Pin, &hencoder, ABZ_RES,
 						 MT6835_ABZ_NO_SWAP, MT6835_ZRE, MT6835_Z_WIDTH_1LSB, MT6835_Z_ARE,
 						 MT6835_CCW_BA);
 
@@ -318,13 +318,12 @@ void init_sistema() {
 		xQueueSend(cola_estados, &mensaje, 1000);
 		return;
 	}
+	// Luego de hacer 0, hago las corrientes 0 para calibrar ADCs
+	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
 
 	// Pongo el 0 de la posicion en la mitad del timer para tener valores positivos y negativos
 	__HAL_TIM_SET_COUNTER(&htim2, 32768);
 	__HAL_TIM_ENABLE_IT(&htim2, TIM_IT_UPDATE);
-
-	// Luego de hacer 0, hago las corrientes 0 para calibrar ADCs
-	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
 
 	mensaje.estado = IDLE;
 	xQueueSend(cola_estados, &mensaje, 1000);
@@ -348,108 +347,80 @@ void fault_handler(mensaje_t *mensaje) {
 
 			HAL_TIM_Base_Stop_IT(&htim1);
 
-			len = snprintf(cadena, sizeof(cadena), "E: SOBRECORRIENTE\n");
+			len = snprintf(cadena, sizeof(cadena), "\nE: SOBRECORRIENTE\n");
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
 		case ENC_INIT:
-			len = snprintf(cadena, sizeof(cadena), "E: Encoder:\n%u\n%u\n%u\n%u\n%u\n%u\n", hencoder.abz_res, hencoder.abz_swap, hencoder.z_edge,
+			len = snprintf(cadena, sizeof(cadena), "\nE: Encoder:\n%u\n%u\n%u\n%u\n%u\n%u\n", hencoder.abz_res, hencoder.abz_swap, hencoder.z_edge,
 																							hencoder.z_width, hencoder.z_phase, hencoder.rot_dir);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
 		case ADC1_CAL:
-			len = snprintf(cadena, sizeof(cadena), "E: ADC1 CAL (%d)\n", mensaje->error);
+			len = snprintf(cadena, sizeof(cadena), "\nE: ADC1 CAL (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
 		case ADC2_CAL:
-			len = snprintf(cadena, sizeof(cadena), "E: ADC2 CAL (%d)\n", mensaje->error);
+			len = snprintf(cadena, sizeof(cadena), "\nE: ADC2 CAL (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
 		case ADC_2:
-			len = snprintf(cadena, sizeof(cadena), "E: ADC2 Start (%d)\n", mensaje->error);
+			len = snprintf(cadena, sizeof(cadena), "\nE: ADC2 Start (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
 		case ADC_MM:
-			len = snprintf(cadena, sizeof(cadena), "E: ADC MultiMode (%d)\n", mensaje->error);
+			len = snprintf(cadena, sizeof(cadena), "\nE: ADC MultiMode (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
 		case TIMER1:
-			len = snprintf(cadena, sizeof(cadena), "E: Timer lazo de posicion (%d)\n", mensaje->error);
+			len = snprintf(cadena, sizeof(cadena), "\nE: Timer lazo de posicion (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
 		case TIMER2:
-			len = snprintf(cadena, sizeof(cadena), "E: Timer encoder (%d)\n", mensaje->error);
+			len = snprintf(cadena, sizeof(cadena), "\nE: Timer encoder (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
 		case PWM1:
-			len = snprintf(cadena, sizeof(cadena), "E: PWM 1 (%d)\n", mensaje->error);
+			len = snprintf(cadena, sizeof(cadena), "\nE: PWM 1 (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
 		case PWM2:
-			len = snprintf(cadena, sizeof(cadena), "E: PWM 2 (%d)\n", mensaje->error);
+			len = snprintf(cadena, sizeof(cadena), "\nE: PWM 2 (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
 		case PWM3:
-			len = snprintf(cadena, sizeof(cadena), "E: PWM 3 (%d)\n", mensaje->error);
+			len = snprintf(cadena, sizeof(cadena), "\nE: PWM 3 (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t*) cadena, len, 1000);
 			break;
 
 		case UART_RX:
-			len = snprintf(cadena, sizeof(cadena), "E: UART RX (%d)\n", mensaje->error);
+			len = snprintf(cadena, sizeof(cadena), "\nE: UART RX (%d)\n", mensaje->error);
 			HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 			break;
 
 		case CLI:
-			HAL_UART_Transmit(&huart1, (uint8_t *)"E: CLI\n", 7, 1000);
+			HAL_UART_Transmit(&huart1, (uint8_t *)"\nE: CLI\n", 8, 1000);
 			break;
 
 		case ENC_OVERFLOW:
 			HAL_TIM_Base_Stop_IT(&htim3);
 			HAL_TIM_Base_Stop_IT(&htim1);
-			HAL_UART_Transmit(&huart1, (uint8_t *)"E: Overflow encoder\n", 20, 1000);
+			HAL_UART_Transmit(&huart1, (uint8_t *)"\nE: Overflow encoder\n", 21, 1000);
 			break;
 
 		default:
-			HAL_UART_Transmit(&huart1, (uint8_t *)"Error desconocido.\n", 19, 1000);
+			HAL_UART_Transmit(&huart1, (uint8_t *)"\nError desconocido\n", 19, 1000);
 			break;
 	}
-
-//	mensaje->estado = NOT_INIT;
-//	xQueueSend(cola_estados, &mensaje, 1000);
-}
-
-void get_adc_offsets() {
-	if (estado_sistema != IDLE) {
-		HAL_UART_Transmit(&huart1, (uint8_t *)"Pasar a estado IDLE\n", 20, 1000);
-		return;
-	}
-	HAL_TIM_Base_Start(&htim3);
-	// Filtro de media movil para eliminar componente de 50Hz
-	uint32_t sum_adc1 = 0, sum_adc2 = 0;
-	uint16_t avg_adc1, avg_adc2;
-	for (int j = 0; j < 512; j++) {
-		sum_adc1 += (uint16_t)((lecturas_adcs & 0xFFFF));
-		sum_adc2 += (uint16_t)(((lecturas_adcs >> 16) & 0xFFFF));
-	}
-
-	// >> 9 es igual a / 512
-	avg_adc1 = sum_adc1 >> 9;
-	avg_adc2 = sum_adc2 >> 9;
-
-	adc_offsets[0] = ADC_0A - avg_adc1;
-	adc_offsets[1] = ADC_0A - avg_adc2;
-
-	HAL_TIM_Base_Stop(&htim3);
-	__HAL_TIM_SET_COUNTER(&htim3, 0);
 }
 
 /* USER CODE END 4 */

@@ -1,2 +1,4 @@
 Release/
 Debug/
+/.settings
+BLDC-FOC-MyEP Debug.launch

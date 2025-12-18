@@ -291,9 +291,6 @@ int32_t get_corrientes_qd0(int32_t *corrientes) {
 	uint16_t lectura_faseA = (uint16_t)(lecturas_adcs & 0xFFFC) + adc_offsets[0];
 	uint16_t lectura_faseB = (uint16_t)((lecturas_adcs >> 16) & 0xFFFC) + adc_offsets[1];
 
-//	lectura_faseA &= 0xFFFC;
-//	lectura_faseB &= 0xFFFC;
-
 	// La lectura nueva del ADC seria xn en el filtro IIR
 	int32_t fx_xnA = FX_ADC_CONST * (lectura_faseA - ADC_0A);
 	int32_t fx_xnB = FX_ADC_CONST * (lectura_faseB - ADC_0A);
@@ -301,11 +298,6 @@ int32_t get_corrientes_qd0(int32_t *corrientes) {
 	// Filtro IIR
 	controlador.fx_corrienteA = controlador.fx_corrienteA + (((int64_t)FX_ALPHA * (fx_xnA - controlador.fx_corrienteA)) >> N);
 	controlador.fx_corrienteB = controlador.fx_corrienteB + (((int64_t)FX_ALPHA * (fx_xnB - controlador.fx_corrienteB)) >> N);
-//	char cadena[16];
-//	int len;
-//
-//	len = snprintf(cadena, sizeof(cadena), "%ld\n", controlador.fx_corrienteA);
-//	HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 
 	int32_t fx_corrienteC = -1 * (controlador.fx_corrienteA + controlador.fx_corrienteB);
 
@@ -452,19 +444,11 @@ void interpolar() {
 }
 
 void set_posicion_final_nueva() {
-	HAL_UART_Transmit(&huart1, (uint8_t *)"Ej: 123.45\nENTER para cancelar\n", 31, 1000);
-	xSemaphoreTake(semaforo_consola, osWaitForever);
-
-	if (buffer_rx[0] == '\0') {
-		HAL_UART_Transmit(&huart1, (uint8_t *)"Cancelado\n", 10, 1000);
-		return;
-	}
-
 	char *endptr = NULL;
-	float fp_nueva_consigna = strtod((char *)buffer_rx, &endptr);
+	float fp_nueva_consigna = strtod((char *)&buffer_rx[1], &endptr);
 
-	if (*endptr == buffer_rx[0]) {
-		HAL_UART_Transmit(&huart1, (uint8_t *)"Consigna no valida\n", 19, 1000);
+	if (*endptr == buffer_rx[1] || buffer_rx[1] == '\0') {
+		HAL_UART_Transmit(&huart1, (uint8_t *)"\nConsigna no valida\n", 19, 1000);
 		return;
 	}
 
@@ -497,7 +481,7 @@ int32_t get_fx_position() {
 //					(overflow_encoder < 0 ? (overflow_encoder + 1) : (overflow_encoder)) * 65536;
 	int32_t steps = __HAL_TIM_GET_COUNTER(&htim2) - 32768;
 
-	fx_debug_pos = fp2fx(steps * 0.15);
+	fx_debug_pos = fp2fx(steps * GRADOS_PULSO);
 
 	return fx_debug_pos;
 }
@@ -730,22 +714,19 @@ void get_Lq() {
 
 void modificar_constantes() {
 	if (estado_sistema != IDLE) {
-		HAL_UART_Transmit(&huart1, (uint8_t *)"Llevar el sistema a IDLE\n", 25, 1000);
+		HAL_UART_Transmit(&huart1, (uint8_t *)"\nLlevar el sistema a IDLE\n", 25, 1000);
 		return;
 	}
-	HAL_UART_Transmit(&huart1, (uint8_t *)"\n>> ", 3, 1000);
-
-	xSemaphoreTake(semaforo_consola, osWaitForever);
 
 	char *endptr = NULL;
-	float nueva = strtod((char *)&buffer_rx[1], &endptr);
+	float nueva = strtod((char *)&buffer_rx[2], &endptr);
 
-	if (*endptr == buffer_rx[0]) {
-		HAL_UART_Transmit(&huart1, (uint8_t *)"Constante no valida\n", 20, 1000);
+	if (*endptr == buffer_rx[2] || buffer_rx[2] == '\n') {
+		HAL_UART_Transmit(&huart1, (uint8_t *)"\nConstante no valida\n", 20, 1000);
 		return;
 	}
 
-	switch (buffer_rx[0]) {
+	switch (buffer_rx[1]) {
 		case 'p':
 		case 'P':
 			controlador.fx_P = fp2fx(nueva);
@@ -769,6 +750,9 @@ void modificar_constantes() {
 		case 'e':
 		case 'E':
 			controlador.fx_Pd = fp2fx(nueva);
+			break;
+
+		default:
 			break;
 	}
 }

@@ -105,8 +105,6 @@ void Error_Handler(void);
 
 void fault_handler(mensaje_t *mensaje);
 void init_sistema();
-void init_posicion();
-void get_adc_offsets();
 
 /* USER CODE END EFP */
 

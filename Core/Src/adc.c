@@ -253,4 +253,29 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* adcHandle)
 
 /* USER CODE BEGIN 1 */
 
+void get_adc_offsets() {
+	if (estado_sistema != IDLE) {
+		HAL_UART_Transmit(&huart1, (uint8_t *)"Pasar a estado IDLE\n", 20, 1000);
+		return;
+	}
+	HAL_TIM_Base_Start(&htim3);
+	// Filtro de media movil para eliminar componente de 50Hz
+	uint32_t sum_adc1 = 0, sum_adc2 = 0;
+	uint16_t avg_adc1, avg_adc2;
+	for (int j = 0; j < 512; j++) {
+		sum_adc1 += (uint16_t)((lecturas_adcs & 0xFFFF));
+		sum_adc2 += (uint16_t)(((lecturas_adcs >> 16) & 0xFFFF));
+	}
+
+	// >> 9 es igual a / 512
+	avg_adc1 = sum_adc1 >> 9;
+	avg_adc2 = sum_adc2 >> 9;
+
+	adc_offsets[0] = ADC_0A - avg_adc1;
+	adc_offsets[1] = ADC_0A - avg_adc2;
+
+	HAL_TIM_Base_Stop(&htim3);
+	__HAL_TIM_SET_COUNTER(&htim3, 0);
+}
+
 /* USER CODE END 1 */

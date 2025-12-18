@@ -30,6 +30,8 @@ extern "C" {
 
 /* USER CODE BEGIN Includes */
 
+#include "control.h"
+
 /* USER CODE END Includes */
 
 extern ADC_HandleTypeDef hadc1;
@@ -44,6 +46,8 @@ void MX_ADC1_Init(void);
 void MX_ADC2_Init(void);
 
 /* USER CODE BEGIN Prototypes */
+
+void get_adc_offsets();
 
 /* USER CODE END Prototypes */
 

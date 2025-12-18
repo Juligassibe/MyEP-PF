@@ -68,13 +68,6 @@ const osThreadAttr_t cli_attributes = {
   .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for test */
-osThreadId_t testHandle;
-const osThreadAttr_t test_attributes = {
-  .name = "test",
-  .stack_size = 256 * 4,
-  .priority = (osPriority_t) osPriorityRealtime7,
-};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -83,7 +76,6 @@ const osThreadAttr_t test_attributes = {
 
 void sm(void *argument);
 void consola(void *argument);
-void test_task(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -143,9 +135,6 @@ void MX_FREERTOS_Init(void) {
   /* creation of cli */
   cliHandle = osThreadNew(consola, NULL, &cli_attributes);
 
-  /* creation of test */
-  testHandle = osThreadNew(test_task, NULL, &test_attributes);
-
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
@@ -183,30 +172,30 @@ void sm(void *argument)
 
 			case IDLE:
 				if (mensaje.origen == 0) {
-					HAL_UART_Transmit(&huart1, (uint8_t *)"Inicio listo\n", 13, 1000);
+					HAL_UART_Transmit(&huart1, (uint8_t *)"\nInicio listo\n", 14, 1000);
 					xSemaphoreGive(semaforo_consola);
 				}
 
 				else if (mensaje.origen == PARADA) {
-					HAL_UART_Transmit(&huart1, (uint8_t *)"Parada de emergencia\n", 21, 1000);
+					HAL_UART_Transmit(&huart1, (uint8_t *)"\nParada de emergencia\n", 22, 1000);
 				}
 
 				else {
-					HAL_UART_Transmit(&huart1, (uint8_t *)"Lazos de control detenidos\n", 27, 1000);
+					HAL_UART_Transmit(&huart1, (uint8_t *)"\nLazos de control detenidos\n", 28, 1000);
 				}
 				break;
 
 			case CLOSED_LOOP:
-				HAL_UART_Transmit(&huart1, (uint8_t *)"Lazos de control iniciados\n", 27, 1000);
+				HAL_UART_Transmit(&huart1, (uint8_t *)"\nLazos de control iniciados\n", 28, 1000);
 				break;
 
 			case FAULT:
 				fault_handler(&mensaje);
-				HAL_UART_Transmit(&huart1, (uint8_t *)"Reiniciar\n", 10, 1000);
+				HAL_UART_Transmit(&huart1, (uint8_t *)"\nReiniciar\n", 11, 1000);
 				break;
 
 			default:
-				HAL_UART_Transmit(&huart1, (uint8_t *)"Estado desconocido\n", 19, 1000);
+				HAL_UART_Transmit(&huart1, (uint8_t *)"\nEstado desconocido\n", 20, 1000);
 				break;
 		}
 
@@ -231,29 +220,29 @@ void consola(void *argument)
 	// No ejecuto la tarea hasta que termina el inicio del sistema
 	xSemaphoreTake(semaforo_consola, osWaitForever);
 
-	const char menu[] = "\n1. Estado del sistema\n"
-					"2. Iniciar lazos de control\n"
-					"3. Parar lazos de control\n"
-					"4. Nueva consigna\n"
-					"5. Obtener posicion\n"
-					"6. Offsets ADCs\n"
-					"7. Cambiar constantes de control\n"
-					">> ";
+//	const char menu[] = "\n1. Estado del sistema\n"
+//					"2. Iniciar lazos de control\n"
+//					"3. Parar lazos de control\n"
+//					"4. Nueva consigna\n"
+//					"5. Obtener posicion\n"
+//					"6. Offsets ADCs\n"
+//					"7. Cambiar constantes de control\n"
+//					">> ";
 
-	uint16_t len_menu = strlen(menu);
+//	uint16_t len_menu = strlen(menu);
 
 	char cadena[64];
 	int len;
 
   /* Infinite loop */
 	while (1) {
-		HAL_UART_Transmit(&huart1, (uint8_t *)menu, len_menu, 1000);
+		HAL_UART_Transmit(&huart1, (uint8_t *)"\n>> ", 4, 1000);
 
 		xSemaphoreTake(semaforo_consola, osWaitForever);
 
 		switch (buffer_rx[0]) {
 			case '1':
-				len = snprintf(cadena, sizeof(cadena), "Estado: %u", estado_sistema);
+				len = snprintf(cadena, sizeof(cadena), "\nEstado: %u", estado_sistema);
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 
@@ -293,16 +282,6 @@ void consola(void *argument)
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
 				break;
 
-			case '8':
-				get_Lq();
-				break;
-
-			case '9':
-				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1) > 0 ? 0 : 200);
-				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
-				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
-				break;
-
 			default:
 				len = snprintf(cadena, sizeof(cadena), "\nRX: %s\n", (char *)buffer_rx);
 				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
@@ -311,34 +290,6 @@ void consola(void *argument)
 
 	}
   /* USER CODE END consola */
-}
-
-/* USER CODE BEGIN Header_test_task */
-/**
-* @brief Function implementing the test thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_test_task */
-void test_task(void *argument)
-{
-  /* USER CODE BEGIN test_task */
-	osDelay(osWaitForever);
-	char cadena[32];
-	int len;
-
-	int32_t corrientes[2];
-	HAL_TIM_Base_Start(&htim3);
-  /* Infinite loop */
-	while (1) {
-		get_corrientes_qd0(corrientes);
-
-		len = snprintf(cadena, sizeof(cadena), "%ld, %ld\n", corrientes[0], corrientes[1]);
-		HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-
-		osDelay(pdMS_TO_TICKS(10));
-	}
-  /* USER CODE END test_task */
 }
 
 /* Private application code --------------------------------------------------*/

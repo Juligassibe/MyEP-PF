@@ -30,6 +30,9 @@
 #define ADC_0A			3102
 #define ADC_3A			3791
 #define ADC_CONST		3.0 /(ADC_3A - ADC_0A)	// Pendiente para convertir lectura ADC a corriente
+#define ABZ_RES			1000
+#define GRADOS_PULSO	0.09
+#define R				2			// Relacion de transmision
 
 typedef struct {
 	// Lazo posicion
