@@ -173,6 +173,7 @@ void sm(void *argument)
 			case IDLE:
 				if (mensaje.origen == 0) {
 					HAL_UART_Transmit(&huart1, (uint8_t *)"\nInicio listo\n", 14, 1000);
+					HAL_GPIO_WritePin(LED_VERDE_GPIO_Port, LED_VERDE_Pin, GPIO_PIN_SET);
 					xSemaphoreGive(semaforo_consola);
 				}
 
@@ -191,6 +192,8 @@ void sm(void *argument)
 
 			case FAULT:
 				fault_handler(&mensaje);
+				HAL_GPIO_WritePin(LED_VERDE_GPIO_Port, LED_VERDE_Pin, GPIO_PIN_RESET);
+				HAL_GPIO_WritePin(LED_ROJO_GPIO_Port, LED_ROJO_Pin, GPIO_PIN_SET);
 				HAL_UART_Transmit(&huart1, (uint8_t *)"\nReiniciar\n", 11, 1000);
 				break;
 
@@ -266,12 +269,6 @@ void consola(void *argument)
 				break;
 
 			case '6':
-				get_adc_offsets();
-				len = snprintf(cadena, sizeof(cadena), "\nOffsets: %d, %d\n", adc_offsets[0], adc_offsets[1]);
-				HAL_UART_Transmit(&huart1, (uint8_t *)cadena, len, 1000);
-				break;
-
-			case '7':
 				modificar_constantes();
 				len = snprintf(cadena, sizeof(cadena), "\n%ld\n%ld\n%ld\n%ld\n%ld\n", controlador.fx_P,
 																					controlador.fx_I,

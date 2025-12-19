@@ -325,6 +325,10 @@ void init_sistema() {
 	__HAL_TIM_SET_COUNTER(&htim2, 32768);
 	__HAL_TIM_ENABLE_IT(&htim2, TIM_IT_UPDATE);
 
+	osDelay(1000);
+
+	get_adc_offsets();
+
 	mensaje.estado = IDLE;
 	xQueueSend(cola_estados, &mensaje, 1000);
 }
