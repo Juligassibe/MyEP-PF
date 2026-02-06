@@ -38,6 +38,10 @@
 #include "control.h"
 #include "mt6835.h"
 
+/*
+ * aber si funca
+ */
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
